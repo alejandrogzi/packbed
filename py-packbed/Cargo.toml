@@ -1,0 +1,20 @@
+[package]
+name = "py-packbed"
+version = "0.0.1"
+edition = "2021"
+authors = ["alejandrogzi <alejandrxgzi@gmail.com>"]
+license = "MIT"
+description = "pack a .bed into overlapping components"
+keywords = ["components", "overlap", "transcript", "bed"]
+
+[lib]
+name = "packbed"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = "0.22.0"
+packbed = { path = "../packbed" }
+hashbrown = { version = "0.14", features = ["rayon", "serde"] }
+serde = { version = "1.0.210", features = ["derive", "rc"] }
+rmp-serde = "1.3.0"
+rayon = "1.8.1"
