@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use hashbrown::HashMap;
@@ -13,11 +13,12 @@ use rmp_serde::decode;
 use serde::{Deserialize, Serialize};
 
 #[pyfunction]
-fn pack(py: Python, bed: PyObject) -> PyResult<Bound<'_, PyDict>> {
+#[pyo3(signature = (bed, overlap_cds=false))]
+fn pack(py: Python, bed: PyObject, overlap_cds: bool) -> PyResult<Bound<'_, PyDict>> {
     let bed = bed
         .extract::<Vec<String>>(py)
         .expect("ERROR: failed to extract bed files");
-    let buckets = packbed(bed).expect("ERROR: failed to pack bed files");
+    let buckets = packbed(bed, overlap_cds).expect("ERROR: failed to pack bed files");
     convert_map_to_pydict(py, buckets)
 }
 
@@ -33,25 +34,40 @@ fn binreader(py: Python, path: PyObject) -> PyResult<Bound<'_, PyDict>> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (bed, hint, out=None))]
-fn to_component(py: Python, bed: PyObject, hint: PyObject, out: Option<PyObject>) -> PyResult<()> {
+#[pyo3(signature = (bed, hint,overlap_cds=None, out=None))]
+fn to_component(
+    py: Python,
+    bed: PyObject,
+    hint: PyObject,
+    overlap_cds: Option<bool>,
+    out: Option<PyObject>,
+) -> PyResult<()> {
     let hint = hint.extract::<Vec<(String, Vec<usize>)>>(py).ok();
     let bed = bed.extract::<Vec<String>>(py)?;
 
     if let Some(out) = out {
-        get_component(bed, hint, Some(out.extract::<String>(py)?));
+        get_component(bed, hint, Some(out.extract::<String>(py)?), overlap_cds);
     } else {
-        get_component(bed, hint, None);
+        get_component(bed, hint, None, overlap_cds);
     }
 
     Ok(())
 }
 
 #[pyfunction]
-fn write_components(py: Python, contents: PyObject) -> PyResult<()> {
+#[pyo3(signature = (contents, output=".", subdirs=false))]
+fn write_components(
+    py: Python,
+    contents: PyObject,
+    output: Option<&str>,
+    subdirs: Option<bool>,
+) -> PyResult<()> {
     let py_dict = contents.downcast_bound::<PyDict>(py)?;
-
     let mut map: HashMap<String, Vec<Vec<Arc<PyGenePred>>>> = HashMap::new();
+    let output = output
+        // .map(|x| x.extract::<PathBuf>(py))
+        // .transpose()?
+        .unwrap_or(".".into());
 
     for (chr, buckets) in py_dict.iter() {
         let chr = chr.extract::<String>()?;
@@ -73,7 +89,7 @@ fn write_components(py: Python, contents: PyObject) -> PyResult<()> {
         map.insert(chr, new_buckets);
     }
 
-    compwriter(map).expect("ERROR: failed to write components");
+    compwriter(map, output, subdirs.unwrap()).expect("ERROR: failed to write components");
 
     Ok(())
 }
@@ -179,16 +195,62 @@ pub fn convert_map_to_pydict(
     Ok(py_dict)
 }
 
-pub fn compwriter(
+// pub fn compwriter(
+//     contents: HashMap<String, Vec<Vec<Arc<PyGenePred>>>>,
+// ) -> Result<(), Box<dyn std::error::Error>> {
+//     contents.iter().par_bridge().for_each(|(chr, buckets)| {
+//         buckets
+//             .iter()
+//             .enumerate()
+//             .par_bridge()
+//             .for_each(|(i, bucket)| {
+//                 let filename = format!("{}_{}.bed", chr, i);
+//                 let mut file =
+//                     BufWriter::new(File::create(&filename).expect("ERROR: Could not create file"));
+
+//                 bucket.iter().for_each(|x| {
+//                     writeln!(file, "{}", x.line()).unwrap();
+//                 });
+//             });
+//     });
+
+//     Ok(())
+// }
+
+pub fn compwriter<T: AsRef<Path> + Debug + Sync>(
     contents: HashMap<String, Vec<Vec<Arc<PyGenePred>>>>,
+    output: T,
+    subdirs: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(&output)?;
+
     contents.iter().par_bridge().for_each(|(chr, buckets)| {
         buckets
             .iter()
             .enumerate()
             .par_bridge()
             .for_each(|(i, bucket)| {
-                let filename = format!("{}_{}.bed", chr, i);
+                let filename = if subdirs {
+                    std::fs::create_dir_all(format!(
+                        "{}/comp_{}_{}",
+                        output.as_ref().display(),
+                        chr,
+                        i
+                    ))
+                    .expect("ERROR: Could not create directory");
+
+                    format!(
+                        "{}/comp_{}_{}/{}_{}.bed",
+                        output.as_ref().display(),
+                        chr,
+                        i,
+                        chr,
+                        i
+                    )
+                } else {
+                    format!("{}/{}_{}.bed", output.as_ref().display(), chr, i)
+                };
+
                 let mut file =
                     BufWriter::new(File::create(&filename).expect("ERROR: Could not create file"));
 

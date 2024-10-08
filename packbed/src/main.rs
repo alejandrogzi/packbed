@@ -27,7 +27,7 @@ struct Args {
         long = "output",
         required = true,
         value_name = "PATH",
-        help = "Path to output BED12 file [not required if -c flag is set]"
+        help = "Path to output BED12 file [will interpret as dir if -c flag is set]"
     )]
     pub output: PathBuf,
 
@@ -44,10 +44,27 @@ struct Args {
         short = 'c',
         long = "comp",
         help = "Flag to split components into separate BED files",
-        value_name = "COMPONENTS",
+        value_name = "FLAG",
         default_value = "false"
     )]
     pub comp: bool,
+
+    #[arg(
+        long = "overlap_cds",
+        help = "Flag to overlap only cds regions",
+        value_name = "FLAG",
+        default_value = "false"
+    )]
+    pub overlap_cds: bool,
+
+    #[arg(
+        short = 's',
+        long = "subdirs",
+        help = "Flag to split components into separate BED files in subdirectories",
+        value_name = "FLAG",
+        default_value = "false"
+    )]
+    pub subdirs: bool,
 }
 
 impl Args {
@@ -112,10 +129,11 @@ fn main() {
         .build_global()
         .unwrap();
 
-    let buckets = packbed(args.bed).expect("Error packing BED files");
+    let buckets = packbed(args.bed, args.overlap_cds).expect("Error packing BED files");
 
     if args.comp {
-        compwriter(buckets).expect("ERROR: Failed writing components to BED files")
+        compwriter(buckets, args.output, args.subdirs)
+            .expect("ERROR: Failed writing components to BED files")
     } else {
         binwriter(&args.output, buckets).expect("ERROR: Failed writing binary of components");
     }
