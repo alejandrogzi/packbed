@@ -13,12 +13,17 @@ use rmp_serde::decode;
 use serde::{Deserialize, Serialize};
 
 #[pyfunction]
-#[pyo3(signature = (bed, overlap_cds=false))]
-fn pack(py: Python, bed: PyObject, overlap_cds: bool) -> PyResult<Bound<'_, PyDict>> {
+#[pyo3(signature = (bed, overlap_cds=true, colorize=true))]
+fn pack(
+    py: Python,
+    bed: PyObject,
+    overlap_cds: bool,
+    colorize: bool,
+) -> PyResult<Bound<'_, PyDict>> {
     let bed = bed
         .extract::<Vec<String>>(py)
         .expect("ERROR: failed to extract bed files");
-    let buckets = packbed(bed, overlap_cds).expect("ERROR: failed to pack bed files");
+    let buckets = packbed(bed, overlap_cds, colorize).expect("ERROR: failed to pack bed files");
     convert_map_to_pydict(py, buckets)
 }
 
@@ -34,44 +39,48 @@ fn binreader(py: Python, path: PyObject) -> PyResult<Bound<'_, PyDict>> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (bed, hint,overlap_cds=None, out=None))]
+#[pyo3(signature = (bed, hint,overlap_cds=true, out=None, colorize=true))]
 fn to_component(
     py: Python,
     bed: PyObject,
     hint: PyObject,
     overlap_cds: Option<bool>,
     out: Option<PyObject>,
+    colorize: Option<bool>,
 ) -> PyResult<()> {
     let hint = hint.extract::<Vec<(String, Vec<usize>)>>(py).ok();
     let bed = bed.extract::<Vec<String>>(py)?;
 
     if let Some(out) = out {
-        get_component(bed, hint, Some(out.extract::<String>(py)?), overlap_cds);
+        get_component(
+            bed,
+            hint,
+            Some(out.extract::<String>(py)?),
+            overlap_cds,
+            colorize,
+        );
     } else {
-        get_component(bed, hint, None, overlap_cds);
+        get_component(bed, hint, None, overlap_cds, colorize);
     }
 
     Ok(())
 }
 
 #[pyfunction]
-#[pyo3(signature = (contents, output=".", subdirs=false))]
+#[pyo3(signature = (contents, output="comps.bed", subdirs=false, out_type="bed"))]
 fn write_components(
     py: Python,
     contents: PyObject,
     output: Option<&str>,
     subdirs: Option<bool>,
+    out_type: &str,
 ) -> PyResult<()> {
-    let py_dict = contents.downcast_bound::<PyDict>(py)?;
     let mut map: HashMap<String, Vec<Vec<Arc<PyGenePred>>>> = HashMap::new();
-    let output = output
-        // .map(|x| x.extract::<PathBuf>(py))
-        // .transpose()?
-        .unwrap_or(".".into());
+    let py_dict = contents.downcast_bound::<PyDict>(py)?;
+    let out_type = TypeChoice::from_str(out_type).expect("ERROR: invalid output type");
 
     for (chr, buckets) in py_dict.iter() {
         let chr = chr.extract::<String>()?;
-
         let buckets = buckets.extract::<Vec<PyObject>>()?;
         let mut new_buckets: Vec<Vec<Arc<PyGenePred>>> = Vec::with_capacity(buckets.len());
 
@@ -89,7 +98,48 @@ fn write_components(
         map.insert(chr, new_buckets);
     }
 
-    compwriter(map, output, subdirs.unwrap()).expect("ERROR: failed to write components");
+    match out_type {
+        TypeChoice::Comp => {
+            let output = Path::new(output.unwrap().trim_end_matches(".bed"));
+            let _ = compwriter(map, output, subdirs.unwrap());
+        }
+        TypeChoice::Bed => {
+            let output = Path::new(output.unwrap_or("comps.bed"));
+            let _ = bedwriter(output, map);
+        }
+    }
+
+    Ok(())
+}
+
+enum TypeChoice {
+    Comp,
+    Bed,
+}
+
+impl TypeChoice {
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "comp" => Some(Self::Comp),
+            "bed" => Some(Self::Bed),
+            _ => None,
+        }
+    }
+}
+
+pub fn bedwriter<P: AsRef<Path> + Debug>(
+    file: P,
+    contents: HashMap<String, Vec<Vec<Arc<PyGenePred>>>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut file = BufWriter::new(File::create(file)?);
+
+    for (_, components) in contents {
+        for component in components {
+            for tx in component {
+                writeln!(file, "{}", tx.line())?;
+            }
+        }
+    }
 
     Ok(())
 }
@@ -194,28 +244,6 @@ pub fn convert_map_to_pydict(
 
     Ok(py_dict)
 }
-
-// pub fn compwriter(
-//     contents: HashMap<String, Vec<Vec<Arc<PyGenePred>>>>,
-// ) -> Result<(), Box<dyn std::error::Error>> {
-//     contents.iter().par_bridge().for_each(|(chr, buckets)| {
-//         buckets
-//             .iter()
-//             .enumerate()
-//             .par_bridge()
-//             .for_each(|(i, bucket)| {
-//                 let filename = format!("{}_{}.bed", chr, i);
-//                 let mut file =
-//                     BufWriter::new(File::create(&filename).expect("ERROR: Could not create file"));
-
-//                 bucket.iter().for_each(|x| {
-//                     writeln!(file, "{}", x.line()).unwrap();
-//                 });
-//             });
-//     });
-
-//     Ok(())
-// }
 
 pub fn compwriter<T: AsRef<Path> + Debug + Sync>(
     contents: HashMap<String, Vec<Vec<Arc<PyGenePred>>>>,
