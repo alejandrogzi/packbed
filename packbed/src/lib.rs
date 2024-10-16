@@ -2,10 +2,10 @@ use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use hashbrown::HashMap;
+use rand::Rng;
 use rayon::prelude::*;
 use rmp_serde::{decode, encode};
 
@@ -13,6 +13,17 @@ pub mod record;
 pub use record::{Bed12, GenePred};
 
 pub type GenePredMap = HashMap<String, Vec<GenePred>>;
+
+pub const RGB: [&str; 8] = [
+    "255,0,0",    // red
+    "0,255,0",    // green
+    "0,0,255",    // blue
+    "255,255,0",  // yellow
+    "255,0,255",  // magenta
+    "0,255,255",  // cyan
+    "255,128,0",  // orange
+    "51,153,255", // sky-blue
+];
 
 fn reader<P: AsRef<Path> + Debug>(file: P) -> Result<String, Box<dyn std::error::Error>> {
     let mut file = File::open(file)?;
@@ -87,18 +98,21 @@ fn exonic_overlap(target_exons: &Vec<(u64, u64)>, query_exons: &Vec<(u64, u64)>)
     false
 }
 
-fn buckerize(tracks: GenePredMap, overlap_cds: bool) -> HashMap<String, Vec<Vec<Arc<GenePred>>>> {
+fn buckerize(
+    tracks: GenePredMap,
+    overlap_cds: bool,
+    colorize: bool,
+) -> HashMap<String, Vec<Vec<Arc<GenePred>>>> {
     let cmap = Mutex::new(HashMap::new());
 
     tracks.into_par_iter().for_each(|(chr, records)| {
-        let mut acc: Vec<(u64, u64, Vec<Arc<GenePred>>)> = Vec::new();
+        let mut acc: Vec<(u64, u64, Vec<Arc<GenePred>>, &str)> = Vec::new();
 
         for tx in records {
             let tx = Arc::new(tx);
 
-            let group = acc
-                .iter_mut()
-                .any(|(ref mut group_start, ref mut group_end, txs)| {
+            let group = acc.iter_mut().any(
+                |(ref mut group_start, ref mut group_end, txs, group_color)| {
                     let (tx_start, tx_end) = if overlap_cds {
                         (tx.cds_start, tx.cds_end)
                     } else {
@@ -113,7 +127,12 @@ fn buckerize(tracks: GenePredMap, overlap_cds: bool) -> HashMap<String, Vec<Vec<
                             *group_start = (*group_start).min(tx_start);
                             *group_end = (*group_end).max(tx_end);
 
-                            txs.push(tx.clone());
+                            if colorize {
+                                txs.push(tx.clone().colorline(*group_color));
+                            } else {
+                                txs.push(tx.clone());
+                            }
+
                             return true;
                         } else {
                             return false;
@@ -121,25 +140,39 @@ fn buckerize(tracks: GenePredMap, overlap_cds: bool) -> HashMap<String, Vec<Vec<
                     } else {
                         false
                     }
-                });
+                },
+            );
 
             if !group {
-                acc.push((tx.start, tx.end, vec![tx.clone()]));
+                let color = choose_color();
+
+                if colorize {
+                    acc.push((tx.start, tx.end, vec![tx.clone().colorline(color)], color));
+                } else {
+                    acc.push((tx.start, tx.end, vec![tx.clone()], color));
+                }
             }
         }
 
-        let acc_map: Vec<Vec<Arc<GenePred>>> = acc.into_iter().map(|(_, _, txs)| txs).collect();
+        let acc_map: Vec<Vec<Arc<GenePred>>> = acc.into_iter().map(|(_, _, txs, _)| txs).collect();
         cmap.lock().unwrap().insert(chr.to_string(), acc_map);
     });
     cmap.into_inner().unwrap()
 }
 
+fn choose_color<'a>() -> &'a str {
+    let mut rng = rand::thread_rng();
+    let idx = rng.gen_range(0..RGB.len());
+    RGB[idx]
+}
+
 pub fn packbed<T: AsRef<Path> + Debug + Send + Sync>(
     bed: Vec<T>,
     overlap_cds: bool,
+    colorize: bool,
 ) -> Result<HashMap<String, Vec<Vec<Arc<GenePred>>>>, anyhow::Error> {
     let tracks = unpack(bed).unwrap();
-    let buckets = buckerize(tracks, overlap_cds);
+    let buckets = buckerize(tracks, overlap_cds, colorize);
 
     Ok(buckets)
 }
@@ -154,13 +187,32 @@ pub fn binwriter<P: AsRef<Path> + Debug>(
     Ok(())
 }
 
+pub fn bedwriter<P: AsRef<Path> + Debug>(
+    file: P,
+    contents: HashMap<String, Vec<Vec<Arc<GenePred>>>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut file = BufWriter::new(File::create(file)?);
+
+    for (_, components) in contents {
+        for component in components {
+            for tx in component {
+                writeln!(file, "{}", tx.line())?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn get_component<T: AsRef<Path> + Debug + Send + Sync>(
     bed: Vec<T>,
     hint: Option<Vec<(String, Vec<usize>)>>,
     out: Option<T>,
     overlap_cds: Option<bool>,
+    colorize: Option<bool>,
 ) {
-    let buckets = packbed(bed, overlap_cds.unwrap_or(false)).expect("Error packing bed files");
+    let buckets = packbed(bed, overlap_cds.unwrap_or(false), colorize.unwrap_or(false))
+        .expect("Error packing bed files");
 
     // [(chr, [1,2,3,4]), (chr, [5,6,7])] fmt to get components
 

@@ -1,6 +1,6 @@
 use packbed::*;
 
-use clap::{self, Parser};
+use clap::{self, Parser, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -27,7 +27,7 @@ struct Args {
         long = "output",
         required = true,
         value_name = "PATH",
-        help = "Path to output BED12 file [will interpret as dir if -c flag is set]"
+        help = "Path to output BED12 file [will interpret as dir if -t flag is set to comp]"
     )]
     pub output: PathBuf,
 
@@ -41,13 +41,13 @@ struct Args {
     pub threads: usize,
 
     #[arg(
-        short = 'c',
-        long = "comp",
-        help = "Flag to split components into separate BED files",
-        value_name = "FLAG",
-        default_value = "false"
+        long = "type",
+        help = "Type of output",
+        value_name = "TYPE",
+        value_enum,
+        default_value = "bed"
     )]
-    pub comp: bool,
+    pub out_type: TypeChoice,
 
     #[arg(
         long = "overlap_cds",
@@ -65,6 +65,21 @@ struct Args {
         default_value = "false"
     )]
     pub subdirs: bool,
+
+    #[arg(
+        long = "colorize",
+        help = "Flag to colorize components in output BED file",
+        value_name = "FLAG",
+        default_value = "false"
+    )]
+    pub colorize: bool,
+}
+
+#[derive(ValueEnum, Debug, Clone)]
+enum TypeChoice {
+    Bin,
+    Comp,
+    Bed,
 }
 
 impl Args {
@@ -74,6 +89,15 @@ impl Args {
 
     fn validate_args(&self) -> anyhow::Result<()> {
         self.check_dbs()?;
+
+        match self.out_type {
+            TypeChoice::Bed => {
+                if !self.colorize {
+                    anyhow::bail!("ERROR: --colorize flag must be set for bed output");
+                }
+            }
+            _ => (),
+        }
 
         Ok(())
     }
@@ -129,13 +153,18 @@ fn main() {
         .build_global()
         .unwrap();
 
-    let buckets = packbed(args.bed, args.overlap_cds).expect("Error packing BED files");
+    let buckets =
+        packbed(args.bed, args.overlap_cds, args.colorize).expect("Error packing BED files");
 
-    if args.comp {
-        compwriter(buckets, args.output, args.subdirs)
-            .expect("ERROR: Failed writing components to BED files")
-    } else {
-        binwriter(&args.output, buckets).expect("ERROR: Failed writing binary of components");
+    match args.out_type {
+        TypeChoice::Bin => {
+            binwriter(&args.output, buckets).expect("ERROR: Failed writing binary of components");
+        }
+        TypeChoice::Comp => compwriter(buckets, &args.output, args.subdirs)
+            .expect("ERROR: Failed writing components to BED files"),
+        TypeChoice::Bed => {
+            bedwriter(&args.output, buckets).expect("ERROR: Failed writing components to BED files")
+        }
     }
 
     dbg!(st.elapsed());
