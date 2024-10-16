@@ -33,6 +33,7 @@
 
 ## Features
 - pack any number of .bed files into overlapping components through a binary, Rust library or Python module
+- write a unique overlapping-component-colorized bed file out of any number of .bed files through a binary, Rust library or Python module
 - split components into separate .bed files through a binary, Rust library or Python module
 - write serialized components to a binary file through a binary and Rust library
 - read serialized components from a binary file through a Rust library or Python module
@@ -40,7 +41,7 @@
 
 ## Usage
 ### Binary
-``` rust
+``` bash
 Usage: packbed [OPTIONS] --bed <PATHS>... --output <PATH>
 
 Arguments:
@@ -49,21 +50,46 @@ Arguments:
 
 Options:
     -t, --threads <THREADS>  Number of threads [default: 8]
-    -c, --comp               Flag to split components into separate BED files
-    -h, --help               Print help
-    --version: print version
+    --type <TYPE>   Type of output [default: bed] [possible values: bin, comp, bed]
+    --overlap_cds   Flag to overlap only cds regions
+    -s, --subdirs   Flag to split components into separate BED files in subdirectories
+    --colorize      Flag to colorize components in output BED(s) file
+    -h, --help      Print help
+    --version:      Print version
 ```
+
+> [!TIP]
+> If you want to get components in separate .bed files use:
+> ```bash
+> packbed -b path/to/b1.bed,path/to/b2.bed -o path/to/output --type comp
+> ```
+> in case you want to send each component to a different subdirectory (good to parallelize processes):
+> ```bash
+> packbed -b path/to/b1.bed,path/to/b2.bed -o path/to/output --type comp -s
+> ```
+> if you want to colorize the components but send them all to just 1 file:
+> ```bash
+> packbed -b path/to/b1.bed,path/to/b2.bed -o path/to/output --colorize --type bed
+> ```
 
 ### Library
 ``` rust
 use packbed::packbed;
 
 fn main() {
+
     let bed1 = PathBuf::new("/path/to/b1.bed");
     let bed2 = PathBuf::new("/path/to/b2.bed");
     let beds = vec![bed1, bed2];
 
-    let comps: HashMap<String, Vec<Vec<Arc<GenePred>>>> = packbed(beds).unwrap();
+    let overlap_cds = true;
+    let colorize = true;
+
+    let comps: HashMap<String, Vec<Vec<Arc<GenePred>>>> = packbed(
+                        beds,
+                        overlap_cds,
+                        colorize)
+                        .unwrap();
 }
 ```
 ### Python
