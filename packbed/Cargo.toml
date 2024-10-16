@@ -1,6 +1,6 @@
 [package]
 name = "packbed"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 authors = ["alejandrogzi <alejandrxgzi@gmail.com>"]
 license = "MIT"
@@ -20,6 +20,7 @@ hashbrown = { version = "0.14", features = ["rayon", "serde"] }
 anyhow = "1.0.81"
 serde = { version = "1.0.210", features = ["derive", "rc"] }
 rmp-serde = "1.3.0"
+rand = "0.8.5"
 
 [profile.release]
 lto = true
