@@ -14,15 +14,17 @@ pub use record::{Bed12, GenePred};
 
 pub type GenePredMap = HashMap<String, Vec<GenePred>>;
 
-pub const RGB: [&str; 8] = [
+pub const RGB: [&str; 10] = [
     "255,0,0",    // red
     "0,255,0",    // green
     "0,0,255",    // blue
-    "255,255,0",  // yellow
+    "58,134,47",  // dark-green
     "255,0,255",  // magenta
     "0,255,255",  // cyan
     "255,128,0",  // orange
     "51,153,255", // sky-blue
+    "118,115,15", // dark-yellow
+    "172,126,0",  // brown
 ];
 
 fn reader<P: AsRef<Path> + Debug>(file: P) -> Result<String, Box<dyn std::error::Error>> {
@@ -45,18 +47,19 @@ fn par_reader<P: AsRef<Path> + Debug + Sync + Send>(
 
 fn unpack<P: AsRef<Path> + Debug + Sync + Send>(
     files: Vec<P>,
+    cds_overlap: bool,
 ) -> Result<GenePredMap, anyhow::Error> {
     let contents = par_reader(files)?;
-    let tracks = parse_tracks(&contents)?;
+    let tracks = parse_tracks(&contents, cds_overlap)?;
 
     Ok(tracks)
 }
 
-fn parse_tracks<'a>(contents: &'a str) -> Result<GenePredMap, anyhow::Error> {
+fn parse_tracks<'a>(contents: &'a str, cds_overlap: bool) -> Result<GenePredMap, anyhow::Error> {
     let mut tracks = contents
         .par_lines()
         .filter(|x| !x.starts_with("#"))
-        .filter_map(|x| Bed12::parse(x).ok())
+        .filter_map(|x| Bed12::parse(x, cds_overlap).ok())
         .fold(
             || HashMap::new(),
             |mut acc: GenePredMap, record| {
@@ -87,14 +90,25 @@ fn parse_tracks<'a>(contents: &'a str) -> Result<GenePredMap, anyhow::Error> {
     Ok(tracks)
 }
 
-fn exonic_overlap(target_exons: &Vec<(u64, u64)>, query_exons: &Vec<(u64, u64)>) -> bool {
-    for (tstart, tend) in target_exons {
-        for (qstart, _) in query_exons {
-            if tstart <= qstart && tend >= qstart {
-                return true;
-            }
+fn exonic_overlap(exons_a: &Vec<(u64, u64)>, exons_b: &Vec<(u64, u64)>) -> bool {
+    let mut i = 0;
+    let mut j = 0;
+
+    while i < exons_a.len() && j < exons_b.len() {
+        let (start_a, end_a) = exons_a[i];
+        let (start_b, end_b) = exons_b[j];
+
+        if start_a < end_b && start_b < end_a {
+            return true;
+        }
+
+        if end_a < end_b {
+            i += 1;
+        } else {
+            j += 1;
         }
     }
+
     false
 }
 
@@ -109,8 +123,6 @@ fn buckerize(
         let mut acc: Vec<(u64, u64, Vec<Arc<GenePred>>, &str)> = Vec::new();
 
         for tx in records {
-            let tx = Arc::new(tx);
-
             let group = acc.iter_mut().any(
                 |(ref mut group_start, ref mut group_end, txs, group_color)| {
                     let (tx_start, tx_end) = if overlap_cds {
@@ -121,11 +133,15 @@ fn buckerize(
 
                     if tx_start >= *group_start && tx_start <= *group_end {
                         // loop over txs exons and see if they overlap
-                        let exon_overlap = txs.iter().any(|x| exonic_overlap(&x.exons, &tx.exons));
+                        let exon_overlap = txs
+                            .iter()
+                            .any(|group| exonic_overlap(&group.exons, &tx.exons));
 
                         if exon_overlap {
                             *group_start = (*group_start).min(tx_start);
                             *group_end = (*group_end).max(tx_end);
+
+                            let tx = Arc::new(tx.clone());
 
                             if colorize {
                                 txs.push(tx.clone().colorline(*group_color));
@@ -145,6 +161,7 @@ fn buckerize(
 
             if !group {
                 let color = choose_color();
+                let tx = Arc::new(tx);
 
                 if colorize {
                     acc.push((tx.start, tx.end, vec![tx.clone().colorline(color)], color));
@@ -157,6 +174,7 @@ fn buckerize(
         let acc_map: Vec<Vec<Arc<GenePred>>> = acc.into_iter().map(|(_, _, txs, _)| txs).collect();
         cmap.lock().unwrap().insert(chr.to_string(), acc_map);
     });
+
     cmap.into_inner().unwrap()
 }
 
@@ -171,7 +189,7 @@ pub fn packbed<T: AsRef<Path> + Debug + Send + Sync>(
     overlap_cds: bool,
     colorize: bool,
 ) -> Result<HashMap<String, Vec<Vec<Arc<GenePred>>>>, anyhow::Error> {
-    let tracks = unpack(bed).unwrap();
+    let tracks = unpack(bed, overlap_cds).unwrap();
     let buckets = buckerize(tracks, overlap_cds, colorize);
 
     Ok(buckets)
