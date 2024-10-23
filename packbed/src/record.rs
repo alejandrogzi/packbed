@@ -39,13 +39,22 @@ impl GenePred {
 
         Arc::new(GenePred {
             line: new_line,
-            ..(*self).clone()
+            name: self.name.clone(),
+            chrom: self.chrom.clone(),
+            strand: self.strand,
+            start: self.start,
+            end: self.end,
+            cds_start: self.cds_start,
+            cds_end: self.cds_end,
+            exons: self.exons.clone(),
+            introns: self.introns.clone(),
+            exon_count: self.exon_count,
         })
     }
 }
 
 impl Bed12 {
-    pub fn parse(line: &str) -> Result<GenePred, &'static str> {
+    pub fn parse(line: &str, cds_overlap: bool) -> Result<GenePred, &'static str> {
         if line.is_empty() {
             return Err("Empty line");
         }
@@ -93,8 +102,14 @@ impl Bed12 {
             abs_pos(tx_start, tx_end, cds_start, cds_end, strand, get)?;
 
         let (exons, introns) = get_coords(exon_starts, exon_sizes, tx_start, tx_end, strand)?;
+
         let mut exons = exons.iter().cloned().collect::<Vec<_>>();
         exons.sort_unstable_by_key(|x| (x.0, x.1));
+        if cds_overlap {
+            // modify first and last exon to only preserve CDS
+            exons[0].0 = cds_start;
+            exons.last_mut().unwrap().1 = cds_end;
+        }
 
         let mut introns = introns.iter().cloned().collect::<Vec<_>>();
         introns.sort_unstable_by_key(|x| (x.0, x.1));
