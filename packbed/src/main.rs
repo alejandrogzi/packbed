@@ -124,7 +124,7 @@ pub fn validate(arg: &PathBuf) -> anyhow::Result<()> {
     }
 
     match arg.extension() {
-        Some(ext) if ext == "bed" => (),
+        Some(ext) if ext == "bed" || ext == "gz" => (),
         _ => {
             return Err(anyhow::anyhow!("file {:?} is not a BED file", arg));
         }

@@ -4,7 +4,9 @@ use std::io::{BufWriter, Read, Write};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use flate2::read::MultiGzDecoder;
 use hashbrown::HashMap;
+use memmap2::Mmap;
 use rand::Rng;
 use rayon::prelude::*;
 use rmp_serde::{decode, encode};
@@ -28,9 +30,27 @@ pub const RGB: [&str; 10] = [
 ];
 
 fn reader<P: AsRef<Path> + Debug>(file: P) -> Result<String, Box<dyn std::error::Error>> {
-    let mut file = File::open(file)?;
+    match file.as_ref().extension() {
+        Some(ext) => match ext.to_str() {
+            Some("gz") => with_gz(&File::open(file)?),
+            _ => {
+                let mut file = File::open(file)?;
+                let mut contents = String::new();
+                file.read_to_string(&mut contents)?;
+                Ok(contents)
+            }
+        },
+        None => Err("No extension found".into()),
+    }
+}
+
+fn with_gz(file: &File) -> Result<String, Box<dyn std::error::Error>> {
+    let mmap = unsafe { Mmap::map(file)? };
+    let mut decoder = MultiGzDecoder::new(&mmap[..]);
+
     let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
+    decoder.read_to_string(&mut contents)?;
+
     Ok(contents)
 }
 
@@ -324,4 +344,84 @@ pub fn compwriter<T: AsRef<Path> + Debug + Sync>(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_packbed_with_simple_bed() {
+        let mut file = NamedTempFile::with_suffix(".bed").unwrap();
+        let path = file.path().to_path_buf();
+
+        let _ = write!(
+            file,
+            "s8	100	200	read1	0	-	110	190	0	3	20,20,20,	0,30,60,\ns8	100	200	read2	0	+	110	190	0	3	20,20,20,	0,30,60,"
+        );
+
+        let bed = vec![path];
+        let overlap_cds = false;
+        let colorize = false;
+
+        let res = packbed(bed, overlap_cds, colorize).unwrap();
+
+        assert_eq!(res.len(), 1);
+    }
+
+    #[test]
+    fn test_packbed_with_simple_bed_gz() {
+        use std::process::Command;
+        use tempfile::NamedTempFile;
+
+        let mut file = NamedTempFile::with_suffix(".bed").unwrap();
+        let path = file.path().to_path_buf();
+
+        write!(
+            file,
+            "s8\t100\t200\tread1\t0\t-\t110\t190\t0\t3\t20,20,20,\t0,30,60,\ns8\t100\t200\tread2\t0\t+\t110\t190\t0\t3\t20,20,20,\t0,30,60,"
+        ).unwrap();
+
+        let output = Command::new("gzip")
+            .arg(&path)
+            .output()
+            .expect("Failed to execute gzip command");
+
+        if !output.status.success() {
+            panic!(
+                "gzip command failed with status: {:?}, stderr: {}",
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let bed = vec![path.with_extension("bed.gz")];
+        let overlap_cds = false;
+        let colorize = false;
+
+        let res = packbed(bed, overlap_cds, colorize).unwrap();
+
+        assert_eq!(res.len(), 1);
+    }
+
+    #[test]
+    fn test_exonic_overlap_true() {
+        let r = &Vec::from([(10, 20), (30, 40), (50, 60)]);
+        let q = &Vec::from([(15, 25), (41, 49), (90, 110)]);
+
+        let res = exonic_overlap(r, q);
+
+        assert_eq!(res, true);
+    }
+
+    #[test]
+    fn test_exonic_overlap_false() {
+        let r = &Vec::from([(10, 20), (30, 40), (50, 60)]);
+        let q = &Vec::from([(21, 25), (41, 49), (90, 110)]);
+
+        let res = exonic_overlap(r, q);
+
+        assert_eq!(res, false);
+    }
 }
