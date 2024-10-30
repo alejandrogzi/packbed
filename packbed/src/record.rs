@@ -101,18 +101,22 @@ impl Bed12 {
         let (tx_start, tx_end, cds_start, cds_end) =
             abs_pos(tx_start, tx_end, cds_start, cds_end, strand, get)?;
 
-        let (exons, introns) = get_coords(exon_starts, exon_sizes, tx_start, tx_end, strand)?;
+        let (exons, introns) = get_coords(
+            exon_starts,
+            exon_sizes,
+            tx_start,
+            tx_end,
+            cds_start,
+            cds_end,
+            strand,
+            cds_overlap,
+        )?;
 
         let mut exons = exons.iter().cloned().collect::<Vec<_>>();
-        exons.sort_unstable_by_key(|x| (x.0, x.1));
-        if cds_overlap {
-            // modify first and last exon to only preserve CDS
-            exons[0].0 = cds_start;
-            exons.last_mut().unwrap().1 = cds_end;
-        }
+        exons.sort_unstable_by(|a, b| a.cmp(b));
 
         let mut introns = introns.iter().cloned().collect::<Vec<_>>();
-        introns.sort_unstable_by_key(|x| (x.0, x.1));
+        introns.sort_unstable_by(|a, b| a.cmp(b));
 
         let exon_count = exons.len();
 
@@ -133,11 +137,14 @@ impl Bed12 {
 }
 
 fn get_coords(
-    start: &str,
-    size: &str,
-    plus: u64,
-    minus: u64,
+    starts: &str,
+    sizes: &str,
+    tx_start: u64,
+    tx_end: u64,
+    cds_start: u64,
+    cds_end: u64,
     strand: char,
+    cds_overlap: bool,
 ) -> Result<(HashSet<(u64, u64)>, HashSet<(u64, u64)>), &'static str> {
     let group = |field: &str| -> Result<Vec<u64>, &'static str> {
         field
@@ -153,16 +160,16 @@ fn get_coords(
             .collect()
     };
 
-    let ss = group(start)?;
-    let sz = group(size)?;
+    let ss = group(starts)?;
+    let sz = group(sizes)?;
 
     if ss.len() != sz.len() {
         return Err("Exon start and end vectors have different lengths");
     }
 
     let offset = match strand {
-        '+' => plus,
-        '-' => minus,
+        '+' => tx_start,
+        '-' => tx_end,
         _ => return Err("Strand is not + or -"),
     };
 
@@ -170,11 +177,42 @@ fn get_coords(
         .iter()
         .zip(&sz)
         .map(|(&s, &z)| match strand {
-            '+' => Ok((s + offset, s + z + offset)),
-            '-' => Ok((offset - s - z, offset - s)),
+            '+' => {
+                if cds_overlap {
+                    if s + z + offset < cds_start || s + offset > cds_end {
+                        return Err("UTRs are not allowed in CDS exons");
+                    } else if s + offset < cds_start {
+                        if s + z + offset > cds_end {
+                            return Ok((cds_start, cds_end));
+                        }
+                        return Ok((cds_start, s + z + offset));
+                    } else if s + z + offset > cds_end {
+                        return Ok((s + offset, cds_end));
+                    }
+                }
+
+                Ok((s + offset, s + z + offset))
+            }
+            '-' => {
+                if cds_overlap {
+                    if offset - s < cds_start || offset - s - z > cds_end {
+                        return Err("UTRs are not allowed in CDS exons");
+                    } else if offset - s < cds_start {
+                        if offset - s - z > cds_end {
+                            return Ok((cds_start, cds_end));
+                        }
+                        return Ok((cds_start, offset - s - z));
+                    } else if offset - s - z > cds_end {
+                        return Ok((offset - s, cds_end));
+                    }
+                };
+
+                Ok((offset - s - z, offset - s))
+            }
             _ => return Err("Strand is not + or -"),
         })
-        .collect::<Result<HashSet<(u64, u64)>, &'static str>>()?;
+        .filter_map(Result::ok)
+        .collect::<HashSet<_>>();
 
     let introns = gapper(&exons);
 
@@ -282,33 +320,122 @@ mod tests {
     fn test_bed12_get_coords_and_gapper_plus() {
         let start = "0,30";
         let size = "10,10";
-        let plus = 10;
-        let minus = 50;
+        let tx_start = 10;
+        let tx_end = 50;
+        let cds_start = 15;
+        let cds_end = 45;
         let strand = '+';
+        let cds_overlap = true;
 
-        let (exons, introns) = get_coords(start, size, plus, minus, strand).unwrap();
+        let (exons, introns) = get_coords(
+            start,
+            size,
+            tx_start,
+            tx_end,
+            cds_start,
+            cds_end,
+            strand,
+            cds_overlap,
+        )
+        .unwrap();
 
-        assert_eq!(exons, [(10, 20), (40, 50)].iter().cloned().collect());
-        assert_eq!(introns, [(21, 39)].iter().cloned().collect());
+        let mut exons = exons.iter().cloned().collect::<Vec<_>>();
+        exons.sort_unstable_by(|a, b| a.cmp(b));
+
+        let mut introns = introns.iter().cloned().collect::<Vec<_>>();
+        introns.sort_unstable_by(|a, b| a.cmp(b));
+
+        assert_eq!(
+            exons,
+            [(15, 20), (40, 45)].iter().cloned().collect::<Vec<_>>()
+        );
+        assert_eq!(introns, [(21, 39)].iter().cloned().collect::<Vec<_>>());
     }
 
     #[test]
     fn test_bed12_get_coords_and_gapper_minus() {
-        let start = "0,10,20";
-        let size = "5,5,80";
-        let plus = 800;
-        let minus = 900;
+        let start = "0,20,40,60,80";
+        let size = "10,10,10,10,10";
+        let tx_start = 10;
+        let tx_end = 100;
+        let cds_start = 30;
+        let cds_end = 80;
         let strand = '-';
+        let cds_overlap = true;
 
-        let (exons, introns) = get_coords(start, size, plus, minus, strand).unwrap();
+        let (exons, introns) = get_coords(
+            start,
+            size,
+            tx_start,
+            tx_end,
+            cds_start,
+            cds_end,
+            strand,
+            cds_overlap,
+        )
+        .unwrap();
+
+        let mut exons = exons.iter().cloned().collect::<Vec<_>>();
+        exons.sort_unstable_by(|a, b| a.cmp(b));
+
+        let mut introns = introns.iter().cloned().collect::<Vec<_>>();
+        introns.sort_unstable_by(|a, b| a.cmp(b));
 
         assert_eq!(
             exons,
-            [(800, 880), (885, 890), (895, 900)]
+            [(30, 40), (50, 60), (70, 80)]
                 .iter()
                 .cloned()
-                .collect()
+                .collect::<Vec<_>>()
         );
-        assert_eq!(introns, [(881, 884), (891, 894)].iter().cloned().collect());
+        assert_eq!(
+            introns,
+            [(41, 49), (61, 69)].iter().cloned().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_bed12_get_coords_and_gapper_plus_nested_utr() {
+        let start = "0,20,40,60,80";
+        let size = "10,10,10,10,10";
+        let tx_start = 10;
+        let tx_end = 100;
+        let cds_start = 15;
+        let cds_end = 95;
+        let strand = '+';
+        let cds_overlap = true;
+
+        let (exons, introns) = get_coords(
+            start,
+            size,
+            tx_start,
+            tx_end,
+            cds_start,
+            cds_end,
+            strand,
+            cds_overlap,
+        )
+        .unwrap();
+
+        let mut exons = exons.iter().cloned().collect::<Vec<_>>();
+        exons.sort_unstable_by(|a, b| a.cmp(b));
+
+        let mut introns = introns.iter().cloned().collect::<Vec<_>>();
+        introns.sort_unstable_by(|a, b| a.cmp(b));
+
+        assert_eq!(
+            exons,
+            [(15, 20), (30, 40), (50, 60), (70, 80), (90, 95)]
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            introns,
+            [(21, 29), (41, 49), (61, 69), (81, 89)]
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+        );
     }
 }
