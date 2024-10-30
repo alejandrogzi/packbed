@@ -90,6 +90,7 @@ fn parse_tracks<'a>(contents: &'a str, cds_overlap: bool) -> Result<GenePredMap,
     Ok(tracks)
 }
 
+#[inline(always)]
 fn exonic_overlap(exons_a: &Vec<(u64, u64)>, exons_b: &Vec<(u64, u64)>) -> bool {
     let mut i = 0;
     let mut j = 0;

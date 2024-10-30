@@ -54,6 +54,7 @@ impl GenePred {
 }
 
 impl Bed12 {
+    #[inline(always)]
     pub fn parse(line: &str, cds_overlap: bool) -> Result<GenePred, &'static str> {
         if line.is_empty() {
             return Err("Empty line");
@@ -136,6 +137,7 @@ impl Bed12 {
     }
 }
 
+#[inline(always)]
 fn get_coords(
     starts: &str,
     sizes: &str,
@@ -219,6 +221,7 @@ fn get_coords(
     Ok((exons, introns))
 }
 
+#[inline(always)]
 fn abs_pos(
     tx_start: &str,
     tx_end: &str,
@@ -253,6 +256,7 @@ fn abs_pos(
     }
 }
 
+#[inline(always)]
 fn gapper(intervals: &HashSet<(u64, u64)>) -> HashSet<(u64, u64)> {
     let mut vintervals: Vec<(u64, u64)> = intervals.iter().copied().collect();
     vintervals.sort_by(|a, b| a.0.cmp(&b.0));
@@ -486,7 +490,7 @@ mod tests {
         assert_eq!(
             exons,
             [
-                (99999999925, 99999999920),
+                (99999999925, 99999999930),
                 (99999999940, 99999999950),
                 (99999999960, 99999999970),
                 (99999999980, 99999999985)
@@ -498,7 +502,7 @@ mod tests {
         assert_eq!(
             introns,
             [
-                (99999999921, 99999999939),
+                (99999999931, 99999999939),
                 (99999999951, 99999999959),
                 (99999999971, 99999999979)
             ]
