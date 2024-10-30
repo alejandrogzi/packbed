@@ -106,8 +106,4 @@ beds = ["path/to/bed1.bed", "path/to/bed2.bed"]
 comps = pack(beds)
 ```
 
-<p align="center">
-    <img width=700 align="center" src="https://imgur.com/wurvvm8.gif">
-</p>
-
 #### crate: [https://crates.io/crates/packbed](https://crates.io/crates/packbed)
