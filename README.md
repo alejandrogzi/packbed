@@ -38,6 +38,11 @@
 - read serialized components from a binary file through a Rust library or Python module
 - write specific components each to a different .bed file through a Rust library or Python module
 
+> What's new on packbed v0.0.4!
+>
+> - Adds .bed.gz support
+> - Fixes monoexon CDS bug
+
 ## Usage
 ### Binary
 ``` bash
@@ -106,4 +111,4 @@ beds = ["path/to/bed1.bed", "path/to/bed2.bed"]
 comps = pack(beds)
 ```
 
-#### crate: [https://crates.io/crates/packbed](https://crates.io/crates/packbed)
+### crate: [https://crates.io/crates/packbed](https://crates.io/crates/packbed)
