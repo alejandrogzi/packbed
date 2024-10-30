@@ -197,13 +197,13 @@ fn get_coords(
                 if cds_overlap {
                     if offset - s < cds_start || offset - s - z > cds_end {
                         return Err("UTRs are not allowed in CDS exons");
-                    } else if offset - s < cds_start {
-                        if offset - s - z > cds_end {
+                    } else if offset - s - z < cds_start {
+                        if offset - s > cds_end {
                             return Ok((cds_start, cds_end));
                         }
-                        return Ok((cds_start, offset - s - z));
-                    } else if offset - s - z > cds_end {
-                        return Ok((offset - s, cds_end));
+                        return Ok((cds_start, offset - s));
+                    } else if offset - s > cds_end {
+                        return Ok((offset - s - z, cds_end));
                     }
                 };
 
@@ -356,12 +356,16 @@ mod tests {
     fn test_bed12_get_coords_and_gapper_minus() {
         let start = "0,20,40,60,80";
         let size = "10,10,10,10,10";
-        let tx_start = 10;
-        let tx_end = 100;
-        let cds_start = 30;
-        let cds_end = 80;
+        let tx_start = "10";
+        let tx_end = "100";
+        let cds_start = "30";
+        let cds_end = "80";
         let strand = '-';
         let cds_overlap = true;
+
+        let get = |field: &str| field.parse::<u64>().map_err(|_| "Cannot parse field");
+        let (tx_start, tx_end, cds_start, cds_end) =
+            abs_pos(tx_start, tx_end, cds_start, cds_end, strand, get).unwrap();
 
         let (exons, introns) = get_coords(
             start,
@@ -383,14 +387,21 @@ mod tests {
 
         assert_eq!(
             exons,
-            [(30, 40), (50, 60), (70, 80)]
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
+            [
+                (99999999920, 99999999930),
+                (99999999940, 99999999950),
+                (99999999960, 99999999970)
+            ]
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
         );
         assert_eq!(
             introns,
-            [(41, 49), (61, 69)].iter().cloned().collect::<Vec<_>>()
+            [(99999999931, 99999999939), (99999999951, 99999999959)]
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
         );
     }
 
@@ -436,6 +447,64 @@ mod tests {
                 .iter()
                 .cloned()
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_bed12_get_coords_and_gapper_minus_nested_utr() {
+        let start = "0,20,40,60";
+        let size = "10,10,10,10";
+        let tx_start = "10";
+        let tx_end = "80";
+        let cds_start = "15";
+        let cds_end = "75";
+        let strand = '-';
+        let cds_overlap = true;
+
+        let get = |field: &str| field.parse::<u64>().map_err(|_| "Cannot parse field");
+        let (tx_start, tx_end, cds_start, cds_end) =
+            abs_pos(tx_start, tx_end, cds_start, cds_end, strand, get).unwrap();
+
+        let (exons, introns) = get_coords(
+            start,
+            size,
+            tx_start,
+            tx_end,
+            cds_start,
+            cds_end,
+            strand,
+            cds_overlap,
+        )
+        .unwrap();
+
+        let mut exons = exons.iter().cloned().collect::<Vec<_>>();
+        exons.sort_unstable_by(|a, b| a.cmp(b));
+
+        let mut introns = introns.iter().cloned().collect::<Vec<_>>();
+        introns.sort_unstable_by(|a, b| a.cmp(b));
+
+        assert_eq!(
+            exons,
+            [
+                (99999999925, 99999999920),
+                (99999999940, 99999999950),
+                (99999999960, 99999999970),
+                (99999999980, 99999999985)
+            ]
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            introns,
+            [
+                (99999999921, 99999999939),
+                (99999999951, 99999999959),
+                (99999999971, 99999999979)
+            ]
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
         );
     }
 }
