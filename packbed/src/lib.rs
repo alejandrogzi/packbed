@@ -100,7 +100,7 @@ fn parse_tracks<'a>(contents: &'a str, cds_overlap: bool) -> Result<GenePredMap,
 
     // sort by start/end in descending order
     tracks.par_iter_mut().for_each(|(_, v)| {
-        v.par_sort_unstable_by_key(|x| (x.start, x.end));
+        v.par_sort_unstable_by(|a, b| a.start.cmp(&b.start).then(b.end.cmp(&a.end)));
     });
 
     let mut count = 0;
@@ -119,7 +119,7 @@ fn exonic_overlap(exons_a: &Vec<(u64, u64)>, exons_b: &Vec<(u64, u64)>) -> bool 
         let (start_a, end_a) = exons_a[i];
         let (start_b, end_b) = exons_b[j];
 
-        if start_a < end_b && start_b < end_a {
+        if start_a < end_b && start_b <= end_a || start_b < end_a && start_a <= end_b {
             return true;
         }
 
@@ -154,11 +154,29 @@ fn buckerize(
 
                     if tx_start >= *group_start && tx_start <= *group_end {
                         // loop over txs exons and see if they overlap
-                        let exon_overlap = txs
-                            .iter()
-                            .any(|group| exonic_overlap(&group.exons, &tx.exons));
 
-                        if exon_overlap {
+                        if overlap_cds {
+                            let exon_overlap = txs
+                                .iter()
+                                .any(|group| exonic_overlap(&group.exons, &tx.exons));
+
+                            if exon_overlap {
+                                *group_start = (*group_start).min(tx_start);
+                                *group_end = (*group_end).max(tx_end);
+
+                                let tx = Arc::new(tx.clone());
+
+                                if colorize {
+                                    txs.push(tx.clone().colorline(*group_color));
+                                } else {
+                                    txs.push(tx.clone());
+                                }
+
+                                return true;
+                            } else {
+                                return false;
+                            }
+                        } else {
                             *group_start = (*group_start).min(tx_start);
                             *group_end = (*group_end).max(tx_end);
 
@@ -171,8 +189,6 @@ fn buckerize(
                             }
 
                             return true;
-                        } else {
-                            return false;
                         }
                     } else {
                         false
