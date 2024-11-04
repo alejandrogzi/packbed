@@ -38,10 +38,10 @@
 - read serialized components from a binary file through a Rust library or Python module
 - write specific components each to a different .bed file through a Rust library or Python module
 
-> What's new on packbed v0.0.4!
+> What's new on packbed v0.0.5!
 >
-> - Adds .bed.gz support
-> - Fixes monoexon CDS bug
+> - Fixes non overlapping CDS logic
+> - Fixes sorting algorithm to put bigger parents first
 
 ## Usage
 ### Binary
