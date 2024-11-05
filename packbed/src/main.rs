@@ -53,9 +53,19 @@ struct Args {
         long = "overlap_cds",
         help = "Flag to overlap only cds regions",
         value_name = "FLAG",
-        default_value = "false"
+        default_value = "false",
+        conflicts_with = "overlap_exon"
     )]
     pub overlap_cds: bool,
+
+    #[arg(
+        long = "overlap_exon",
+        help = "Flag to overlap only exon regions",
+        value_name = "FLAG",
+        default_value = "false",
+        conflicts_with = "overlap_cds"
+    )]
+    pub overlap_exon: bool,
 
     #[arg(
         short = 's',
@@ -153,8 +163,8 @@ fn main() {
         .build_global()
         .unwrap();
 
-    let buckets =
-        packbed(args.bed, args.overlap_cds, args.colorize).expect("Error packing BED files");
+    let buckets = packbed(args.bed, args.overlap_cds, args.overlap_exon, args.colorize)
+        .expect("Error packing BED files");
 
     match args.out_type {
         TypeChoice::Bin => {

@@ -136,6 +136,7 @@ fn exonic_overlap(exons_a: &Vec<(u64, u64)>, exons_b: &Vec<(u64, u64)>) -> bool 
 fn buckerize(
     tracks: GenePredMap,
     overlap_cds: bool,
+    overlap_exon: bool,
     colorize: bool,
 ) -> HashMap<String, Vec<Vec<Arc<GenePred>>>> {
     let cmap = Mutex::new(HashMap::new());
@@ -155,7 +156,7 @@ fn buckerize(
                     if tx_start >= *group_start && tx_start <= *group_end {
                         // loop over txs exons and see if they overlap
 
-                        if overlap_cds {
+                        if overlap_cds || overlap_exon {
                             let exon_overlap = txs
                                 .iter()
                                 .any(|group| exonic_overlap(&group.exons, &tx.exons));
@@ -224,10 +225,11 @@ fn choose_color<'a>() -> &'a str {
 pub fn packbed<T: AsRef<Path> + Debug + Send + Sync>(
     bed: Vec<T>,
     overlap_cds: bool,
+    overlap_exon: bool,
     colorize: bool,
 ) -> Result<HashMap<String, Vec<Vec<Arc<GenePred>>>>, anyhow::Error> {
     let tracks = unpack(bed, overlap_cds).unwrap();
-    let buckets = buckerize(tracks, overlap_cds, colorize);
+    let buckets = buckerize(tracks, overlap_cds, overlap_exon, colorize);
 
     Ok(buckets)
 }
@@ -264,10 +266,16 @@ pub fn get_component<T: AsRef<Path> + Debug + Send + Sync>(
     hint: Option<Vec<(String, Vec<usize>)>>,
     out: Option<T>,
     overlap_cds: Option<bool>,
+    overlap_exon: Option<bool>,
     colorize: Option<bool>,
 ) {
-    let buckets = packbed(bed, overlap_cds.unwrap_or(false), colorize.unwrap_or(false))
-        .expect("Error packing bed files");
+    let buckets = packbed(
+        bed,
+        overlap_cds.unwrap_or(false),
+        overlap_exon.unwrap_or(false),
+        colorize.unwrap_or(false),
+    )
+    .expect("Error packing bed files");
 
     // [(chr, [1,2,3,4]), (chr, [5,6,7])] fmt to get components
 
@@ -379,9 +387,10 @@ mod tests {
 
         let bed = vec![path];
         let overlap_cds = false;
+        let overlap_exon = false;
         let colorize = false;
 
-        let res = packbed(bed, overlap_cds, colorize).unwrap();
+        let res = packbed(bed, overlap_cds, overlap_exon, colorize).unwrap();
 
         assert_eq!(res.len(), 1);
     }
@@ -414,9 +423,10 @@ mod tests {
 
         let bed = vec![path.with_extension("bed.gz")];
         let overlap_cds = false;
+        let overlap_exon = false;
         let colorize = false;
 
-        let res = packbed(bed, overlap_cds, colorize).unwrap();
+        let res = packbed(bed, overlap_cds, overlap_exon, colorize).unwrap();
 
         assert_eq!(res.len(), 1);
     }
