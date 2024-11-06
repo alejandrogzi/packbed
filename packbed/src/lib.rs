@@ -119,7 +119,7 @@ fn exonic_overlap(exons_a: &Vec<(u64, u64)>, exons_b: &Vec<(u64, u64)>) -> bool 
         let (start_a, end_a) = exons_a[i];
         let (start_b, end_b) = exons_b[j];
 
-        if start_a < end_b && start_b <= end_a || start_b < end_a && start_a <= end_b {
+        if start_a < end_b && start_b < end_a {
             return true;
         }
 
@@ -142,11 +142,11 @@ fn buckerize(
     let cmap = Mutex::new(HashMap::new());
 
     tracks.into_par_iter().for_each(|(chr, records)| {
-        let mut acc: Vec<(u64, u64, Vec<Arc<GenePred>>, &str)> = Vec::new();
+        let mut acc: Vec<(u64, u64, Vec<Arc<GenePred>>, &str, Vec<Arc<GenePred>>)> = Vec::new();
 
         for tx in records {
             let group = acc.iter_mut().any(
-                |(ref mut group_start, ref mut group_end, txs, group_color)| {
+                |(ref mut group_start, ref mut group_end, txs, group_color, backup)| {
                     let (tx_start, tx_end) = if overlap_cds {
                         (tx.cds_start, tx.cds_end)
                     } else {
@@ -156,7 +156,18 @@ fn buckerize(
                     if tx_start >= *group_start && tx_start <= *group_end {
                         // loop over txs exons and see if they overlap
 
-                        if overlap_cds || overlap_exon {
+                        *group_start = (*group_start).min(tx_start);
+                        *group_end = (*group_end).max(tx_end);
+
+                        let tx = Arc::new(tx.clone());
+
+                        if !overlap_cds && !overlap_exon {
+                            if colorize {
+                                txs.push(tx.clone().colorline(*group_color));
+                            } else {
+                                txs.push(tx.clone());
+                            }
+                        } else {
                             let exon_overlap = txs
                                 .iter()
                                 .any(|group| exonic_overlap(&group.exons, &tx.exons));
@@ -165,32 +176,43 @@ fn buckerize(
                                 *group_start = (*group_start).min(tx_start);
                                 *group_end = (*group_end).max(tx_end);
 
-                                let tx = Arc::new(tx.clone());
-
                                 if colorize {
                                     txs.push(tx.clone().colorline(*group_color));
                                 } else {
                                     txs.push(tx.clone());
                                 }
 
+                                // if backup is not empty, iterate over things in backup
+                                // and see if they overlap with exons in the current group
+                                if !backup.is_empty() {
+                                    let mut new_backup = Vec::new();
+
+                                    for tx in backup.drain(..) {
+                                        let exon_overlap = txs
+                                            .iter()
+                                            .any(|group| exonic_overlap(&group.exons, &tx.exons));
+
+                                        if exon_overlap {
+                                            if colorize {
+                                                txs.push(tx.clone().colorline(*group_color));
+                                            } else {
+                                                txs.push(tx.clone());
+                                            }
+                                        } else {
+                                            new_backup.push(tx.clone());
+                                        }
+                                    }
+
+                                    *backup = new_backup;
+                                }
+
                                 return true;
                             } else {
-                                return false;
+                                backup.push(tx.clone());
                             }
-                        } else {
-                            *group_start = (*group_start).min(tx_start);
-                            *group_end = (*group_end).max(tx_end);
-
-                            let tx = Arc::new(tx.clone());
-
-                            if colorize {
-                                txs.push(tx.clone().colorline(*group_color));
-                            } else {
-                                txs.push(tx.clone());
-                            }
-
-                            return true;
                         }
+
+                        return true;
                     } else {
                         false
                     }
@@ -202,14 +224,86 @@ fn buckerize(
                 let tx = Arc::new(tx);
 
                 if colorize {
-                    acc.push((tx.start, tx.end, vec![tx.clone().colorline(color)], color));
+                    acc.push((
+                        tx.start,
+                        tx.end,
+                        vec![tx.clone().colorline(color)],
+                        color,
+                        vec![],
+                    ));
                 } else {
-                    acc.push((tx.start, tx.end, vec![tx.clone()], color));
+                    acc.push((tx.start, tx.end, vec![tx.clone()], color, vec![]));
                 }
             }
         }
 
-        let acc_map: Vec<Vec<Arc<GenePred>>> = acc.into_iter().map(|(_, _, txs, _)| txs).collect();
+        let acc_map: Vec<Vec<Arc<GenePred>>> = acc
+            .into_iter()
+            .flat_map(|(_, _, txs, _, mut recover)| {
+                let mut all_groups: Vec<Vec<Arc<GenePred>>> = Vec::new();
+                all_groups.push(txs);
+
+                // insert recover as new txs group
+                if !recover.is_empty() {
+                    // process recovered txs by iterating over recovered txs
+                    // and see if they overlap between them. If they do, colorize
+                    // them if --colorize and put them in their own new group
+                    let mut recovered_groups = Vec::new();
+                    let mut current = 0;
+                    while current < recover.len() {
+                        if !recovered_groups.is_empty() {
+                            // try to see if current tx overlaps with any of the groups
+                            // if it does, add it to the group and remove it from the recover
+                            let rescue_group = recovered_groups.iter_mut().find_map(
+                                |group: &mut Vec<Arc<GenePred>>| {
+                                    let rs = group.iter().any(|tx| {
+                                        exonic_overlap(&tx.exons, &recover[current].exons)
+                                    });
+
+                                    if rs {
+                                        Some(group)
+                                    } else {
+                                        None
+                                    }
+                                },
+                            );
+
+                            if let Some(group) = rescue_group {
+                                group.push(recover[current].clone());
+                                recover.remove(current);
+                                continue;
+                            }
+                        }
+
+                        let mut group = vec![recover[current].clone()];
+                        let mut next = current + 1;
+                        while next < recover.len() {
+                            let overlap = group
+                                .iter()
+                                .any(|tx| exonic_overlap(&tx.exons, &recover[next].exons));
+
+                            if overlap {
+                                group.push(recover[next].clone());
+                                recover.remove(next);
+                            } else {
+                                next += 1;
+                            }
+                        }
+
+                        recovered_groups.push(group);
+                        current += 1;
+                    }
+
+                    for group in recovered_groups {
+                        let color = choose_color();
+                        let group = group.into_iter().map(|tx| tx.colorline(color)).collect();
+                        all_groups.push(group);
+                    }
+                }
+
+                all_groups
+            })
+            .collect();
         cmap.lock().unwrap().insert(chr.to_string(), acc_map);
     });
 
