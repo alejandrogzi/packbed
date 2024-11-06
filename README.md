@@ -38,10 +38,10 @@
 - read serialized components from a binary file through a Rust library or Python module
 - write specific components each to a different .bed file through a Rust library or Python module
 
-> What's new on packbed v0.0.5!
+> What's new on packbed v0.0.6!
 >
-> - Fixes non overlapping CDS logic
-> - Fixes sorting algorithm to put bigger parents first
+> - Fixes lost overlapping components because of sorting step
+> - Adds --overlap_exon flag to overlap only exon regions (no UTR-aware)
 
 ## Usage
 ### Binary
@@ -56,6 +56,7 @@ Options:
     -t, --threads <THREADS>  Number of threads [default: 8]
     --type <TYPE>   Type of output [default: bed] [possible values: bin, comp, bed]
     --overlap_cds   Flag to overlap only cds regions
+    --overlap_exon  Flag to overlap only exon regions
     -s, --subdirs   Flag to split components into separate BED files in subdirectories
     --colorize      Flag to colorize components in output BED(s) file
     -h, --help      Print help
@@ -71,9 +72,9 @@ Options:
 > ```bash
 > packbed -b path/to/b1.bed,path/to/b2.bed -o path/to/output --type comp -s
 > ```
-> if you want to colorize the components but send them all to just 1 file:
+> if you want to colorize the components but send them all to just 1.bed file [default]:
 > ```bash
-> packbed -b path/to/b1.bed,path/to/b2.bed -o path/to/output --colorize --type bed
+> packbed -b path/to/b1.bed,path/to/b2.bed -o path/to/output --colorize
 > ```
 
 ### Library
@@ -87,11 +88,13 @@ fn main() {
     let beds = vec![bed1, bed2];
 
     let overlap_cds = true;
+    let overlap_exon = false;
     let colorize = true;
 
     let comps: HashMap<String, Vec<Vec<Arc<GenePred>>>> = packbed(
                         beds,
                         overlap_cds,
+                        overlap_exon,
                         colorize)
                         .unwrap();
 }
