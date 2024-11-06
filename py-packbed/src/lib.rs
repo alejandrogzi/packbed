@@ -13,17 +13,19 @@ use rmp_serde::decode;
 use serde::{Deserialize, Serialize};
 
 #[pyfunction]
-#[pyo3(signature = (bed, overlap_cds=true, colorize=true))]
+#[pyo3(signature = (bed, overlap_cds=true,overlap_exon=false, colorize=true))]
 fn pack(
     py: Python,
     bed: PyObject,
     overlap_cds: bool,
+    overlap_exon: bool,
     colorize: bool,
 ) -> PyResult<Bound<'_, PyDict>> {
     let bed = bed
         .extract::<Vec<String>>(py)
         .expect("ERROR: failed to extract bed files");
-    let buckets = packbed(bed, overlap_cds, colorize).expect("ERROR: failed to pack bed files");
+    let buckets =
+        packbed(bed, overlap_cds, overlap_exon, colorize).expect("ERROR: failed to pack bed files");
     convert_map_to_pydict(py, buckets)
 }
 
@@ -39,12 +41,13 @@ fn binreader(py: Python, path: PyObject) -> PyResult<Bound<'_, PyDict>> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (bed, hint,overlap_cds=true, out=None, colorize=true))]
+#[pyo3(signature = (bed, hint,overlap_cds=true, overlap_exon=false, out=None, colorize=true))]
 fn to_component(
     py: Python,
     bed: PyObject,
     hint: PyObject,
     overlap_cds: Option<bool>,
+    overlap_exon: Option<bool>,
     out: Option<PyObject>,
     colorize: Option<bool>,
 ) -> PyResult<()> {
@@ -57,10 +60,11 @@ fn to_component(
             hint,
             Some(out.extract::<String>(py)?),
             overlap_cds,
+            overlap_exon,
             colorize,
         );
     } else {
-        get_component(bed, hint, None, overlap_cds, colorize);
+        get_component(bed, hint, None, overlap_cds, overlap_exon, colorize);
     }
 
     Ok(())

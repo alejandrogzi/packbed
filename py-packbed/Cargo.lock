@@ -357,7 +357,7 @@ dependencies = [
 
 [[package]]
 name = "packbed"
-version = "0.0.4"
+version = "0.0.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -418,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "py-packbed"
-version = "0.0.2"
+version = "0.0.3"
 dependencies = [
  "hashbrown",
  "packbed",
