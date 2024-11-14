@@ -38,10 +38,10 @@
 - read serialized components from a binary file through a Rust library or Python module
 - write specific components each to a different .bed file through a Rust library or Python module
 
-> What's new on packbed v0.0.6!
+> What's new on packbed v0.0.7!
 >
-> - Fixes lost overlapping components because of sorting step
-> - Adds --overlap_exon flag to overlap only exon regions (no UTR-aware)
+> - Implements a new query range algorithm to pack components
+> - Reduces time by more than x25 when working with more than 1 million reads
 
 ## Usage
 ### Binary
@@ -92,11 +92,11 @@ fn main() {
     let colorize = true;
 
     let comps: HashMap<String, Vec<Vec<Arc<GenePred>>>> = packbed(
-                        beds,
-                        overlap_cds,
-                        overlap_exon,
-                        colorize)
-                        .unwrap();
+        beds,
+        overlap_cds,
+        overlap_exon,
+        colorize)
+    .unwrap();
 }
 ```
 ### Python
