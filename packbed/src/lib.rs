@@ -1,12 +1,16 @@
+use std::borrow::Borrow;
+use std::cmp::PartialOrd;
+use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 
+use dashmap::DashMap;
 use flate2::read::MultiGzDecoder;
 use hashbrown::HashMap;
 use memmap2::Mmap;
+use num_traits::{Num, NumCast};
 use rand::Rng;
 use rayon::prelude::*;
 use rmp_serde::{decode, encode};
@@ -110,23 +114,36 @@ fn parse_tracks<'a>(contents: &'a str, cds_overlap: bool) -> Result<GenePredMap,
     Ok(tracks)
 }
 
+#[allow(dead_code)]
 #[inline(always)]
-fn exonic_overlap(exons_a: &Vec<(u64, u64)>, exons_b: &Vec<(u64, u64)>) -> bool {
-    let mut i = 0;
-    let mut j = 0;
+fn exonic_overlap<N, I>(exons_a: &BTreeSet<(N, N)>, exons_b: I) -> bool
+where
+    N: Num + NumCast + Copy + PartialOrd,
+    I: IntoIterator,
+    I::Item: Borrow<(N, N)>,
+{
+    let mut iter_a = exons_a.iter();
+    let mut iter_b = exons_b.into_iter();
 
-    while i < exons_a.len() && j < exons_b.len() {
-        let (start_a, end_a) = exons_a[i];
-        let (start_b, end_b) = exons_b[j];
+    let mut exon_a = iter_a.next();
+    let mut exon_b = iter_b.next();
 
-        if start_a < end_b && start_b < end_a {
-            return true;
-        }
+    loop {
+        match (exon_a, exon_b.as_ref()) {
+            (Some(&(start_a, end_a)), Some(exon_b_ref)) => {
+                let (start_b, end_b) = exon_b_ref.borrow();
 
-        if end_a < end_b {
-            i += 1;
-        } else {
-            j += 1;
+                if start_a < *end_b && *start_b < end_a {
+                    return true;
+                }
+
+                if end_a < *end_b {
+                    exon_a = iter_a.next();
+                } else {
+                    exon_b = iter_b.next();
+                }
+            }
+            _ => break,
         }
     }
 
@@ -138,176 +155,67 @@ fn buckerize(
     overlap_cds: bool,
     overlap_exon: bool,
     colorize: bool,
-) -> HashMap<String, Vec<Vec<Arc<GenePred>>>> {
-    let cmap = Mutex::new(HashMap::new());
+) -> DashMap<String, Vec<Vec<GenePred>>> {
+    let cmap = DashMap::new();
 
-    tracks.into_par_iter().for_each(|(chr, records)| {
-        let mut acc: Vec<(u64, u64, Vec<Arc<GenePred>>, &str, Vec<Arc<GenePred>>)> = Vec::new();
+    tracks.into_par_iter().for_each(|(chr, transcripts)| {
+        let mut exons = Vec::new();
+        let mut id_map = HashMap::new();
+        let mut uf = UnionFind::new(transcripts.len());
 
-        for tx in records {
-            let group = acc.iter_mut().any(
-                |(ref mut group_start, ref mut group_end, txs, group_color, backup)| {
-                    let (tx_start, tx_end) = if overlap_cds {
-                        (tx.cds_start, tx.cds_end)
-                    } else {
-                        (tx.start, tx.end)
-                    };
+        // if base mode, tx boundaries will behave as exons ranges
+        for (i, transcript) in transcripts.iter().enumerate() {
+            id_map.insert(i, transcript);
 
-                    if tx_start >= *group_start && tx_start <= *group_end {
-                        // loop over txs exons and see if they overlap
-
-                        *group_start = (*group_start).min(tx_start);
-                        *group_end = (*group_end).max(tx_end);
-
-                        let tx = Arc::new(tx.clone());
-
-                        if !overlap_cds && !overlap_exon {
-                            if colorize {
-                                txs.push(tx.clone().colorline(*group_color));
-                            } else {
-                                txs.push(tx.clone());
-                            }
-                        } else {
-                            let exon_overlap = txs
-                                .iter()
-                                .any(|group| exonic_overlap(&group.exons, &tx.exons));
-
-                            if exon_overlap {
-                                *group_start = (*group_start).min(tx_start);
-                                *group_end = (*group_end).max(tx_end);
-
-                                if colorize {
-                                    txs.push(tx.clone().colorline(*group_color));
-                                } else {
-                                    txs.push(tx.clone());
-                                }
-
-                                // if backup is not empty, iterate over things in backup
-                                // and see if they overlap with exons in the current group
-                                if !backup.is_empty() {
-                                    let mut new_backup = Vec::new();
-
-                                    for tx in backup.drain(..) {
-                                        let exon_overlap = txs
-                                            .iter()
-                                            .any(|group| exonic_overlap(&group.exons, &tx.exons));
-
-                                        if exon_overlap {
-                                            if colorize {
-                                                txs.push(tx.clone().colorline(*group_color));
-                                            } else {
-                                                txs.push(tx.clone());
-                                            }
-                                        } else {
-                                            new_backup.push(tx.clone());
-                                        }
-                                    }
-
-                                    *backup = new_backup;
-                                }
-
-                                return true;
-                            } else {
-                                backup.push(tx.clone());
-                            }
-                        }
-
-                        return true;
-                    } else {
-                        false
-                    }
-                },
-            );
-
-            if !group {
-                let color = choose_color();
-                let tx = Arc::new(tx);
-
-                if colorize {
-                    acc.push((
-                        tx.start,
-                        tx.end,
-                        vec![tx.clone().colorline(color)],
-                        color,
-                        vec![],
-                    ));
-                } else {
-                    acc.push((tx.start, tx.end, vec![tx.clone()], color, vec![]));
+            if !overlap_exon && !overlap_cds {
+                exons.push((transcript.start, transcript.end, i));
+            } else {
+                for &(start, end) in &transcript.exons {
+                    exons.push((start, end, i));
                 }
             }
         }
 
-        let acc_map: Vec<Vec<Arc<GenePred>>> = acc
+        exons.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let mut prev_end = exons[0].1;
+        let mut prev_idx = exons[0].2;
+        for &(start, end, idx) in &exons[1..] {
+            if start < prev_end {
+                uf.union(prev_idx, idx);
+                prev_end = prev_end.max(end);
+            } else {
+                // no overlap, update prev_end and prev_idx
+                prev_end = end;
+                prev_idx = idx;
+            }
+        }
+
+        let mut groups = HashMap::new();
+        for i in 0..transcripts.len() {
+            let root = uf.find(i);
+            groups
+                .entry(root)
+                .or_insert_with(Vec::new)
+                .push(id_map[&i].clone());
+        }
+
+        let comps = groups
             .into_iter()
-            .flat_map(|(_, _, txs, _, mut recover)| {
-                let mut all_groups: Vec<Vec<Arc<GenePred>>> = Vec::new();
-                all_groups.push(txs);
-
-                // insert recover as new txs group
-                if !recover.is_empty() {
-                    // process recovered txs by iterating over recovered txs
-                    // and see if they overlap between them. If they do, colorize
-                    // them if --colorize and put them in their own new group
-                    let mut recovered_groups = Vec::new();
-                    let mut current = 0;
-                    while current < recover.len() {
-                        if !recovered_groups.is_empty() {
-                            // try to see if current tx overlaps with any of the groups
-                            // if it does, add it to the group and remove it from the recover
-                            let rescue_group = recovered_groups.iter_mut().find_map(
-                                |group: &mut Vec<Arc<GenePred>>| {
-                                    let rs = group.iter().any(|tx| {
-                                        exonic_overlap(&tx.exons, &recover[current].exons)
-                                    });
-
-                                    if rs {
-                                        Some(group)
-                                    } else {
-                                        None
-                                    }
-                                },
-                            );
-
-                            if let Some(group) = rescue_group {
-                                group.push(recover[current].clone());
-                                recover.remove(current);
-                                continue;
-                            }
-                        }
-
-                        let mut group = vec![recover[current].clone()];
-                        let mut next = current + 1;
-                        while next < recover.len() {
-                            let overlap = group
-                                .iter()
-                                .any(|tx| exonic_overlap(&tx.exons, &recover[next].exons));
-
-                            if overlap {
-                                group.push(recover[next].clone());
-                                recover.remove(next);
-                            } else {
-                                next += 1;
-                            }
-                        }
-
-                        recovered_groups.push(group);
-                        current += 1;
-                    }
-
-                    for group in recovered_groups {
-                        let color = choose_color();
-                        let group = group.into_iter().map(|tx| tx.colorline(color)).collect();
-                        all_groups.push(group);
-                    }
+            .map(|(_, v)| {
+                if colorize {
+                    let color = choose_color();
+                    v.into_iter().map(|gp| gp.colorline(color)).collect()
+                } else {
+                    v
                 }
-
-                all_groups
             })
             .collect();
-        cmap.lock().unwrap().insert(chr.to_string(), acc_map);
+
+        cmap.insert(chr, comps);
     });
 
-    cmap.into_inner().unwrap()
+    cmap
 }
 
 fn choose_color<'a>() -> &'a str {
@@ -321,7 +229,7 @@ pub fn packbed<T: AsRef<Path> + Debug + Send + Sync>(
     overlap_cds: bool,
     overlap_exon: bool,
     colorize: bool,
-) -> Result<HashMap<String, Vec<Vec<Arc<GenePred>>>>, anyhow::Error> {
+) -> Result<DashMap<String, Vec<Vec<GenePred>>>, anyhow::Error> {
     let tracks = unpack(bed, overlap_cds).unwrap();
     let buckets = buckerize(tracks, overlap_cds, overlap_exon, colorize);
 
@@ -330,9 +238,10 @@ pub fn packbed<T: AsRef<Path> + Debug + Send + Sync>(
 
 pub fn binwriter<P: AsRef<Path> + Debug>(
     file: P,
-    contents: HashMap<String, Vec<Vec<Arc<GenePred>>>>,
+    contents: DashMap<String, Vec<Vec<GenePred>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut file = File::create(file)?;
+    let contents = contents.into_iter().collect::<HashMap<_, _>>();
 
     encode::write(&mut file, &contents)?;
     Ok(())
@@ -340,7 +249,7 @@ pub fn binwriter<P: AsRef<Path> + Debug>(
 
 pub fn bedwriter<P: AsRef<Path> + Debug>(
     file: P,
-    contents: HashMap<String, Vec<Vec<Arc<GenePred>>>>,
+    contents: DashMap<String, Vec<Vec<GenePred>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut file = BufWriter::new(File::create(file)?);
 
@@ -396,8 +305,11 @@ pub fn get_component<T: AsRef<Path> + Debug + Send + Sync>(
                 None => BufWriter::new(File::create("comp.bed").unwrap()),
             };
 
+            let bs = buckets.clone().into_read_only();
+            let k = bs.keys().next().unwrap();
+
             buckets
-                .get(buckets.keys().next().unwrap())
+                .get(k)
                 .unwrap()
                 .first()
                 .unwrap()
@@ -419,13 +331,16 @@ pub fn binreader<P: AsRef<Path> + Debug>(
 }
 
 pub fn compwriter<T: AsRef<Path> + Debug + Sync>(
-    contents: HashMap<String, Vec<Vec<Arc<GenePred>>>>,
+    contents: DashMap<String, Vec<Vec<GenePred>>>,
     output: T,
     subdirs: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&output)?;
 
-    contents.iter().par_bridge().for_each(|(chr, buckets)| {
+    contents.iter().par_bridge().for_each(|comps| {
+        let chr = comps.key();
+        let buckets = comps.value();
+
         buckets
             .iter()
             .enumerate()
@@ -464,6 +379,36 @@ pub fn compwriter<T: AsRef<Path> + Debug + Sync>(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+struct UnionFind {
+    parent: Vec<usize>,
+}
+
+impl UnionFind {
+    fn new(n: usize) -> Self {
+        Self {
+            parent: (0..n).collect(),
+        }
+    }
+
+    #[inline(always)]
+    fn find(&mut self, x: usize) -> usize {
+        if self.parent[x] != x {
+            self.parent[x] = self.find(self.parent[x]);
+        }
+        self.parent[x]
+    }
+
+    #[inline(always)]
+    fn union(&mut self, x: usize, y: usize) {
+        let root_x = self.find(x);
+        let root_y = self.find(y);
+        if root_x != root_y {
+            self.parent[root_y] = root_x;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,7 +421,7 @@ mod tests {
 
         let _ = write!(
             file,
-            "s8	100	200	read1	0	-	110	190	0	3	20,20,20,	0,30,60,\ns8	100	200	read2	0	+	110	190	0	3	20,20,20,	0,30,60,"
+            "s8\t100\t200\tread1\t0\t-\t110\t190\t0\t3\t20,20,20,\t0,30,60,\ns8\t100\t200\tread2\t0\t+\t110\t190\t0\t3\t20,20,20,\t0,30,60,"
         );
 
         let bed = vec![path];
@@ -527,7 +472,7 @@ mod tests {
 
     #[test]
     fn test_exonic_overlap_true() {
-        let r = &Vec::from([(10, 20), (30, 40), (50, 60)]);
+        let r = &BTreeSet::from([(10, 20), (30, 40), (50, 60)]);
         let q = &Vec::from([(15, 25), (41, 49), (90, 110)]);
 
         let res = exonic_overlap(r, q);
@@ -537,7 +482,7 @@ mod tests {
 
     #[test]
     fn test_exonic_overlap_false() {
-        let r = &Vec::from([(10, 20), (30, 40), (50, 60)]);
+        let r = &BTreeSet::from([(10, 20), (30, 40), (50, 60)]);
         let q = &Vec::from([(21, 25), (41, 49), (90, 110)]);
 
         let res = exonic_overlap(r, q);
