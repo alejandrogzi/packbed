@@ -1,6 +1,6 @@
 [package]
 name = "packbed"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 authors = ["alejandrogzi <alejandrxgzi@gmail.com>"]
 license = "MIT"
@@ -12,7 +12,7 @@ repository = "https://github.com/alejandrogzi/packbed"
 categories = ["command-line-utilities", "science"]
 
 [dependencies]
-dashmap = { version = "5.5.3", features = ["rayon"] }
+dashmap = { version = "6", features = ["rayon"] }
 clap = { version = "4.0", features = ["derive"] }
 rayon = "1.8.1"
 num_cpus = "1.16.0"
@@ -24,6 +24,7 @@ rand = "0.8.5"
 memmap2 = "0.9.4"
 flate2 = "1.0.20"
 tempfile = "^3"
+num-traits = "0.2.19"
 
 [profile.release]
 lto = true

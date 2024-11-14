@@ -1,6 +1,5 @@
 use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 const SCALE: u64 = 100000000000; // 100Gb
 
@@ -31,13 +30,13 @@ impl GenePred {
         &self.name
     }
 
-    pub fn colorline(self: Arc<Self>, color: &str) -> Arc<Self> {
+    pub fn colorline(self: Self, color: &str) -> Self {
         let nline = self.line.clone();
         let mut fields = nline.split('\t').collect::<Vec<_>>();
         fields[8] = color;
         let new_line = fields.join("\t");
 
-        Arc::new(GenePred {
+        GenePred {
             line: new_line,
             name: self.name.clone(),
             chrom: self.chrom.clone(),
@@ -49,7 +48,7 @@ impl GenePred {
             exons: self.exons.clone(),
             introns: self.introns.clone(),
             exon_count: self.exon_count,
-        })
+        }
     }
 }
 

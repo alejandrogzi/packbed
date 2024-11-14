@@ -160,7 +160,7 @@ fn main() {
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(args.threads)
-        .build_global()
+        .build()
         .unwrap();
 
     let buckets = packbed(args.bed, args.overlap_cds, args.overlap_exon, args.colorize)
