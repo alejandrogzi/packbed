@@ -4,6 +4,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use dashmap::DashMap;
 use hashbrown::HashMap;
 use packbed::{get_component, packbed, GenePred};
 use pyo3::prelude::*;
@@ -26,6 +27,7 @@ fn pack(
         .expect("ERROR: failed to extract bed files");
     let buckets =
         packbed(bed, overlap_cds, overlap_exon, colorize).expect("ERROR: failed to pack bed files");
+
     convert_map_to_pydict(py, buckets)
 }
 
@@ -36,7 +38,7 @@ fn binreader(py: Python, path: PyObject) -> PyResult<Bound<'_, PyDict>> {
             .expect("ERROR: failed to extract file path"),
     )?;
 
-    let contents = decode::from_read(f).expect("ERROR: failed to read file");
+    let contents = decode::from_read(f).expect("ERROR: failed to decode file");
     convert_map_to_pydict(py, contents)
 }
 
@@ -224,7 +226,7 @@ impl From<GenePred> for PyGenePred {
 
 pub fn convert_map_to_pydict(
     py: Python,
-    map: HashMap<String, Vec<Vec<Arc<GenePred>>>>,
+    map: DashMap<String, Vec<Vec<GenePred>>>,
 ) -> PyResult<Bound<'_, PyDict>> {
     let py_dict = PyDict::new_bound(py);
 
@@ -237,7 +239,7 @@ pub fn convert_map_to_pydict(
                     PyList::new_bound(
                         py,
                         vec.into_iter()
-                            .map(|arc_gp| PyGenePred::from((*arc_gp).clone()).into_py(py))
+                            .map(|arc_gp| PyGenePred::from((arc_gp).clone()).into_py(py))
                             .collect::<Vec<_>>(),
                     )
                 })
