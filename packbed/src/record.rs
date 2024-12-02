@@ -18,6 +18,7 @@ pub struct GenePred {
     pub exons: Vec<(u64, u64)>,
     pub introns: Vec<(u64, u64)>,
     pub exon_count: usize,
+    pub rgb: String,
     pub line: String,
 }
 
@@ -47,6 +48,7 @@ impl GenePred {
             cds_end: self.cds_end,
             exons: self.exons.clone(),
             introns: self.introns.clone(),
+            rgb: color.into(),
             exon_count: self.exon_count,
         }
     }
@@ -69,7 +71,7 @@ impl Bed12 {
             strand,
             cds_start,
             cds_end,
-            _,
+            rgb,
             _,
             exon_sizes,
             exon_starts,
@@ -131,6 +133,7 @@ impl Bed12 {
             exons,
             introns,
             exon_count,
+            rgb: rgb.into(),
             line: line.to_string(),
         })
     }
