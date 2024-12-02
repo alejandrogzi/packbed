@@ -174,6 +174,7 @@ pub struct PyGenePred {
     pub exons: Vec<(u64, u64)>,
     pub introns: Vec<(u64, u64)>,
     pub exon_count: usize,
+    pub rgb: String,
     pub line: String,
 }
 
@@ -189,9 +190,14 @@ impl PyGenePred {
         &self.name
     }
 
+    #[getter]
+    pub fn rgb(&self) -> &String {
+        &self.rgb
+    }
+
     fn __repr__(&self) -> PyResult<String> {
         Ok(format!(
-            "PyGenePred(name='{}', chrom='{}', strand='{}', start={}, end={}, cds_start={}, cds_end={}, exon_count={}, exons={:?}, introns={:?})",
+            "PyGenePred(name='{}', chrom='{}', strand='{}', start={}, end={}, cds_start={}, cds_end={}, exon_count={}, exons={:?}, introns={:?}, color={:?})",
             self.name,
             self.chrom,
             self.strand,
@@ -201,7 +207,8 @@ impl PyGenePred {
             self.cds_end,
             self.exon_count,
             self.exons,
-            self.introns
+            self.introns,
+            self.rgb
         ))
     }
 }
@@ -219,6 +226,7 @@ impl From<GenePred> for PyGenePred {
             exons: gp.exons,
             introns: gp.introns,
             exon_count: gp.exon_count,
+            rgb: gp.rgb,
             line: gp.line,
         }
     }
