@@ -56,7 +56,7 @@ impl GenePred {
 
 impl Bed12 {
     #[inline(always)]
-    pub fn parse(line: &str, cds_overlap: bool) -> Result<GenePred, &'static str> {
+    pub fn parse(line: &str, overlap_type: OverlapType) -> Result<GenePred, &'static str> {
         if line.is_empty() {
             return Err("Empty line");
         }
@@ -111,7 +111,7 @@ impl Bed12 {
             cds_start,
             cds_end,
             strand,
-            cds_overlap,
+            overlap_type,
         )?;
 
         let mut exons = exons.iter().cloned().collect::<Vec<_>>();
@@ -148,7 +148,7 @@ fn get_coords(
     cds_start: u64,
     cds_end: u64,
     strand: char,
-    cds_overlap: bool,
+    overlap: OverlapType,
 ) -> Result<(HashSet<(u64, u64)>, HashSet<(u64, u64)>), &'static str> {
     let group = |field: &str| -> Result<Vec<u64>, &'static str> {
         field
@@ -181,10 +181,13 @@ fn get_coords(
         .iter()
         .zip(&sz)
         .map(|(&s, &z)| match strand {
-            '+' => {
-                if cds_overlap {
+            '+' => match overlap {
+                OverlapType::Exon | OverlapType::Boundary | OverlapType::CDSBound => {
+                    Ok((s + offset, s + z + offset))
+                }
+                OverlapType::CDS => {
                     if s + z + offset < cds_start || s + offset > cds_end {
-                        return Err("UTRs are not allowed in CDS exons");
+                        return Err("ERROR: UTRs are not allowed in CDS exons!");
                     } else if s + offset < cds_start {
                         if s + z + offset > cds_end {
                             return Ok((cds_start, cds_end));
@@ -192,13 +195,16 @@ fn get_coords(
                         return Ok((cds_start, s + z + offset));
                     } else if s + z + offset > cds_end {
                         return Ok((s + offset, cds_end));
+                    } else {
+                        Ok((s + offset, s + z + offset))
                     }
                 }
-
-                Ok((s + offset, s + z + offset))
-            }
-            '-' => {
-                if cds_overlap {
+            },
+            '-' => match overlap {
+                OverlapType::Exon | OverlapType::Boundary | OverlapType::CDSBound => {
+                    Ok((offset - s - z, offset - s))
+                }
+                OverlapType::CDS => {
                     if offset - s < cds_start || offset - s - z > cds_end {
                         return Err("UTRs are not allowed in CDS exons");
                     } else if offset - s - z < cds_start {
@@ -208,11 +214,11 @@ fn get_coords(
                         return Ok((cds_start, offset - s));
                     } else if offset - s > cds_end {
                         return Ok((offset - s - z, cds_end));
+                    } else {
+                        Ok((offset - s - z, offset - s))
                     }
-                };
-
-                Ok((offset - s - z, offset - s))
-            }
+                }
+            },
             _ => return Err("Strand is not + or -"),
         })
         .filter_map(Result::ok)
@@ -278,6 +284,40 @@ fn gapper(intervals: &HashSet<(u64, u64)>) -> HashSet<(u64, u64)> {
     gaps
 }
 
+/// Overlap type
+///
+/// This enum is used to store the type of overlap.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use packbed::OverlapType;
+///
+/// let cds = OverlapType::CDS;
+/// let exon = OverlapType::Exon;
+/// let boundary = OverlapType::Boundary;
+/// let cds_bound = OverlapType::CDSBound;
+/// ```
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum OverlapType {
+    CDS,      // CDS-overlap
+    Exon,     // exon-overlap
+    Boundary, // boundary-overlap
+    CDSBound, // CDS-overlap-UTR-boundary
+}
+
+impl From<&str> for OverlapType {
+    fn from(value: &str) -> Self {
+        match value {
+            "cds" => OverlapType::CDS,
+            "exon" => OverlapType::Exon,
+            "bounds" => OverlapType::Boundary,
+            "cds-bounded" => OverlapType::CDSBound,
+            _ => panic!("ERROR: Cannot parse overlap type!"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,7 +371,7 @@ mod tests {
         let cds_start = 15;
         let cds_end = 45;
         let strand = '+';
-        let cds_overlap = true;
+        let overlap_type = OverlapType::CDS;
 
         let (exons, introns) = get_coords(
             start,
@@ -341,7 +381,7 @@ mod tests {
             cds_start,
             cds_end,
             strand,
-            cds_overlap,
+            overlap_type,
         )
         .unwrap();
 
@@ -367,7 +407,7 @@ mod tests {
         let cds_start = "30";
         let cds_end = "80";
         let strand = '-';
-        let cds_overlap = true;
+        let overlap_type = OverlapType::CDS;
 
         let get = |field: &str| field.parse::<u64>().map_err(|_| "Cannot parse field");
         let (tx_start, tx_end, cds_start, cds_end) =
@@ -381,7 +421,7 @@ mod tests {
             cds_start,
             cds_end,
             strand,
-            cds_overlap,
+            overlap_type,
         )
         .unwrap();
 
@@ -420,7 +460,7 @@ mod tests {
         let cds_start = 15;
         let cds_end = 95;
         let strand = '+';
-        let cds_overlap = true;
+        let overlap_type = OverlapType::CDS;
 
         let (exons, introns) = get_coords(
             start,
@@ -430,7 +470,7 @@ mod tests {
             cds_start,
             cds_end,
             strand,
-            cds_overlap,
+            overlap_type,
         )
         .unwrap();
 
@@ -465,7 +505,7 @@ mod tests {
         let cds_start = "15";
         let cds_end = "75";
         let strand = '-';
-        let cds_overlap = true;
+        let overlap_type = OverlapType::CDS;
 
         let get = |field: &str| field.parse::<u64>().map_err(|_| "Cannot parse field");
         let (tx_start, tx_end, cds_start, cds_end) =
@@ -479,7 +519,7 @@ mod tests {
             cds_start,
             cds_end,
             strand,
-            cds_overlap,
+            overlap_type,
         )
         .unwrap();
 

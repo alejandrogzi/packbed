@@ -1,4 +1,4 @@
-use packbed::*;
+use packbed::{record::OverlapType, *};
 
 use clap::{self, Parser, ValueEnum};
 use std::path::PathBuf;
@@ -50,22 +50,13 @@ struct Args {
     pub out_type: TypeChoice,
 
     #[arg(
-        long = "overlap_cds",
-        help = "Flag to overlap only cds regions",
-        value_name = "FLAG",
-        default_value = "false",
+        long = "overlap_type",
+        help = "Type of overlap",
+        value_name = "TYPE",
+        default_value = "exon",
         conflicts_with = "overlap_exon"
     )]
-    pub overlap_cds: bool,
-
-    #[arg(
-        long = "overlap_exon",
-        help = "Flag to overlap only exon regions",
-        value_name = "FLAG",
-        default_value = "false",
-        conflicts_with = "overlap_cds"
-    )]
-    pub overlap_exon: bool,
+    pub overlap_type: OverlapType,
 
     #[arg(
         short = 's',
@@ -163,8 +154,8 @@ fn main() {
         .build()
         .unwrap();
 
-    let buckets = packbed(args.bed, args.overlap_cds, args.overlap_exon, args.colorize)
-        .expect("Error packing BED files");
+    let buckets =
+        packbed(args.bed, args.overlap_type, args.colorize).expect("Error packing BED files");
 
     match args.out_type {
         TypeChoice::Bin => {

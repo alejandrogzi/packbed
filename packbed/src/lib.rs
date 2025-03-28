@@ -13,6 +13,7 @@ use memmap2::Mmap;
 use num_traits::{Num, NumCast};
 use rand::Rng;
 use rayon::prelude::*;
+use record::OverlapType;
 use rmp_serde::{decode, encode};
 
 pub mod record;
@@ -71,19 +72,22 @@ fn par_reader<P: AsRef<Path> + Debug + Sync + Send>(
 
 fn unpack<P: AsRef<Path> + Debug + Sync + Send>(
     files: Vec<P>,
-    cds_overlap: bool,
+    overlap_type: OverlapType,
 ) -> Result<GenePredMap, anyhow::Error> {
     let contents = par_reader(files)?;
-    let tracks = parse_tracks(&contents, cds_overlap)?;
+    let tracks = parse_tracks(&contents, overlap_type)?;
 
     Ok(tracks)
 }
 
-fn parse_tracks<'a>(contents: &'a str, cds_overlap: bool) -> Result<GenePredMap, anyhow::Error> {
+fn parse_tracks<'a>(
+    contents: &'a str,
+    overlap_type: OverlapType,
+) -> Result<GenePredMap, anyhow::Error> {
     let mut tracks = contents
         .par_lines()
-        .filter(|x| !x.starts_with("#"))
-        .filter_map(|x| Bed12::parse(x, cds_overlap).ok())
+        .filter(|row| !row.starts_with("#"))
+        .filter_map(|row| Bed12::parse(row, overlap_type).ok())
         .fold(
             || HashMap::new(),
             |mut acc: GenePredMap, record| {
@@ -152,8 +156,7 @@ where
 
 fn buckerize(
     tracks: GenePredMap,
-    overlap_cds: bool,
-    overlap_exon: bool,
+    overlap_type: OverlapType,
     colorize: bool,
 ) -> DashMap<String, Vec<Vec<GenePred>>> {
     let cmap = DashMap::new();
@@ -167,11 +170,14 @@ fn buckerize(
         for (i, transcript) in transcripts.iter().enumerate() {
             id_map.insert(i, transcript);
 
-            if !overlap_exon && !overlap_cds {
-                exons.push((transcript.start, transcript.end, i));
-            } else {
-                for &(start, end) in &transcript.exons {
-                    exons.push((start, end, i));
+            match overlap_type {
+                OverlapType::Exon | OverlapType::CDS | OverlapType::CDSBound => {
+                    for &(start, end) in &transcript.exons {
+                        exons.push((start, end, i));
+                    }
+                }
+                OverlapType::Boundary => {
+                    exons.push((transcript.start, transcript.end, i));
                 }
             }
         }
@@ -226,12 +232,11 @@ fn choose_color<'a>() -> &'a str {
 
 pub fn packbed<T: AsRef<Path> + Debug + Send + Sync>(
     bed: Vec<T>,
-    overlap_cds: bool,
-    overlap_exon: bool,
+    overlap_type: OverlapType,
     colorize: bool,
 ) -> Result<DashMap<String, Vec<Vec<GenePred>>>, anyhow::Error> {
-    let tracks = unpack(bed, overlap_cds).unwrap();
-    let buckets = buckerize(tracks, overlap_cds, overlap_exon, colorize);
+    let tracks = unpack(bed, overlap_type).unwrap();
+    let buckets = buckerize(tracks, overlap_type, colorize);
 
     Ok(buckets)
 }
@@ -268,14 +273,12 @@ pub fn get_component<T: AsRef<Path> + Debug + Send + Sync>(
     bed: Vec<T>,
     hint: Option<Vec<(String, Vec<usize>)>>,
     out: Option<T>,
-    overlap_cds: Option<bool>,
-    overlap_exon: Option<bool>,
+    overlap_type: Option<OverlapType>,
     colorize: Option<bool>,
 ) {
     let buckets = packbed(
         bed,
-        overlap_cds.unwrap_or(false),
-        overlap_exon.unwrap_or(false),
+        overlap_type.unwrap_or(OverlapType::Exon),
         colorize.unwrap_or(false),
     )
     .expect("Error packing bed files");
@@ -425,11 +428,10 @@ mod tests {
         );
 
         let bed = vec![path];
-        let overlap_cds = false;
-        let overlap_exon = false;
+        let overlap_type = OverlapType::Exon;
         let colorize = false;
 
-        let res = packbed(bed, overlap_cds, overlap_exon, colorize).unwrap();
+        let res = packbed(bed, overlap_type, colorize).unwrap();
 
         assert_eq!(res.len(), 1);
     }
@@ -461,11 +463,10 @@ mod tests {
         }
 
         let bed = vec![path.with_extension("bed.gz")];
-        let overlap_cds = false;
-        let overlap_exon = false;
+        let overlap_type = OverlapType::Exon;
         let colorize = false;
 
-        let res = packbed(bed, overlap_cds, overlap_exon, colorize).unwrap();
+        let res = packbed(bed, overlap_type, colorize).unwrap();
 
         assert_eq!(res.len(), 1);
     }
