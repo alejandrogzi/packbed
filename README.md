@@ -55,8 +55,7 @@ Arguments:
 Options:
     -t, --threads <THREADS>  Number of threads [default: 8]
     --type <TYPE>   Type of output [default: bed] [possible values: bin, comp, bed]
-    --overlap_cds   Flag to overlap only cds regions
-    --overlap_exon  Flag to overlap only exon regions
+    --overlap_type <TYPE>  Type of overlap [default: exon]
     -s, --subdirs   Flag to split components into separate BED files in subdirectories
     --colorize      Flag to colorize components in output BED(s) file
     -h, --help      Print help
@@ -87,14 +86,12 @@ fn main() {
     let bed2 = PathBuf::new("/path/to/b2.bed");
     let beds = vec![bed1, bed2];
 
-    let overlap_cds = true;
-    let overlap_exon = false;
+    let overlap_type = OverlapType::Exon;
     let colorize = true;
 
     let comps: HashMap<String, Vec<Vec<Arc<GenePred>>>> = packbed(
         beds,
-        overlap_cds,
-        overlap_exon,
+        overlap_type,
         colorize)
     .unwrap();
 }
