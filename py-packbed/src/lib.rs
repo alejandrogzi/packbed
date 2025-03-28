@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 use hashbrown::HashMap;
+use packbed::record::OverlapType;
 use packbed::{get_component, packbed, GenePred};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -14,19 +15,19 @@ use rmp_serde::decode;
 use serde::{Deserialize, Serialize};
 
 #[pyfunction]
-#[pyo3(signature = (bed, overlap_cds=true,overlap_exon=false, colorize=true))]
-fn pack(
-    py: Python,
+#[pyo3(signature = (bed, overlap_type="exon", colorize=true))]
+fn pack<'a>(
+    py: Python<'a>,
     bed: PyObject,
-    overlap_cds: bool,
-    overlap_exon: bool,
+    overlap_type: &'a str,
     colorize: bool,
-) -> PyResult<Bound<'_, PyDict>> {
+) -> PyResult<Bound<'a, PyDict>> {
     let bed = bed
         .extract::<Vec<String>>(py)
         .expect("ERROR: failed to extract bed files");
-    let buckets =
-        packbed(bed, overlap_cds, overlap_exon, colorize).expect("ERROR: failed to pack bed files");
+    let overlap_type = OverlapType::from(overlap_type);
+
+    let buckets = packbed(bed, overlap_type, colorize).expect("ERROR: failed to pack bed files");
 
     convert_map_to_pydict(py, buckets)
 }
@@ -43,13 +44,12 @@ fn binreader(py: Python, path: PyObject) -> PyResult<Bound<'_, PyDict>> {
 }
 
 #[pyfunction]
-#[pyo3(signature = (bed, hint,overlap_cds=true, overlap_exon=false, out=None, colorize=true))]
+#[pyo3(signature = (bed, hint, overlap_type="exon", out=None, colorize=true))]
 fn to_component(
     py: Python,
     bed: PyObject,
     hint: PyObject,
-    overlap_cds: Option<bool>,
-    overlap_exon: Option<bool>,
+    overlap_type: &str,
     out: Option<PyObject>,
     colorize: Option<bool>,
 ) -> PyResult<()> {
@@ -61,12 +61,17 @@ fn to_component(
             bed,
             hint,
             Some(out.extract::<String>(py)?),
-            overlap_cds,
-            overlap_exon,
+            Some(OverlapType::from(overlap_type)),
             colorize,
         );
     } else {
-        get_component(bed, hint, None, overlap_cds, overlap_exon, colorize);
+        get_component(
+            bed,
+            hint,
+            None,
+            Some(OverlapType::from(overlap_type)),
+            colorize,
+        );
     }
 
     Ok(())
