@@ -1,6 +1,6 @@
 [package]
 name = "packbed"
-version = "0.0.9"
+version = "0.0.10"
 edition = "2021"
 authors = ["alejandrogzi <alejandrxgzi@gmail.com>"]
 license = "MIT"
@@ -12,23 +12,21 @@ repository = "https://github.com/alejandrogzi/packbed"
 categories = ["command-line-utilities", "science"]
 
 [dependencies]
-dashmap = { version = "6", features = ["rayon"] }
+dashmap = { version = "6", features = ["rayon"], optional = true }
 clap = { version = "4.0", features = ["derive"] }
 rayon = "1.8.1"
 num_cpus = "1.16.0"
-hashbrown = { version = "0.14", features = ["rayon", "serde"] }
-anyhow = "1.0.81"
-serde = { version = "1.0.210", features = ["derive", "rc"] }
-rmp-serde = "1.3.0"
-rand = "0.8.5"
-memmap2 = "0.9.4"
-flate2 = "1.0.20"
-tempfile = "^3"
-num-traits = "0.2.19"
+genepred = { version = "0.0.8", features = ["rayon", "mmap"] }
 
 [profile.release]
 lto = true
 opt-level = 3
+codegen-units = 1
+
+[features]
+default = ["hashmap"]
+hashmap = []
+dashmap = ["dep:dashmap"]
 
 [[bin]]
 name = "packbed"
