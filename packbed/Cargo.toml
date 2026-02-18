@@ -16,7 +16,7 @@ dashmap = { version = "6", features = ["rayon"], optional = true }
 clap = { version = "4.0", features = ["derive"] }
 rayon = "1.8.1"
 num_cpus = "1.16.0"
-genepred = { version = "0.0.2", features = ["rayon", "mmap"] }
+genepred = { version = "0.0.8", features = ["rayon", "mmap"] }
 
 [profile.release]
 lto = true

@@ -163,9 +163,9 @@ checksum = "60b1af1c220855b6ceac025d3f6ecdd2b7c4894bfe9cd9bda4fbb4bc7c0d4cf0"
 
 [[package]]
 name = "genepred"
-version = "0.0.2"
+version = "0.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79cb7020e510fa245c76c458abaa28f4575025b18d280df7f2008a12b821ba80"
+checksum = "67f16b1434d6489d0fcd536e5e1d178f5224e325880138f25b270f305ef95d5d"
 dependencies = [
  "memchr",
  "memmap2",

@@ -9,10 +9,10 @@ use rayon::prelude::*;
 use dashmap::DashMap;
 
 #[cfg(feature = "dashmap")]
-type Map<K, V> = DashMap<K, V>;
+pub type Map<K, V> = DashMap<K, V>;
 
 #[cfg(not(feature = "dashmap"))]
-type Map<K, V> = HashMap<K, V>;
+pub type Map<K, V> = HashMap<K, V>;
 
 #[cfg(feature = "dashmap")]
 fn init_map<K, V>() -> DashMap<K, V> {
