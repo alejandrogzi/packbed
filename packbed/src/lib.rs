@@ -7,6 +7,10 @@ use rayon::prelude::*;
 
 #[cfg(feature = "dashmap")]
 use dashmap::DashMap;
+#[cfg(feature = "dashmap")]
+use std::cmp::Eq;
+#[cfg(feature = "dashmap")]
+use std::hash::Hash;
 
 #[cfg(feature = "dashmap")]
 pub type Map<K, V> = DashMap<K, V>;
@@ -15,7 +19,7 @@ pub type Map<K, V> = DashMap<K, V>;
 pub type Map<K, V> = HashMap<K, V>;
 
 #[cfg(feature = "dashmap")]
-fn init_map<K, V>() -> DashMap<K, V> {
+fn init_map<K: Hash + Eq, V>() -> DashMap<K, V> {
     DashMap::new()
 }
 
@@ -70,8 +74,9 @@ pub fn pack<T: AsRef<Path> + Debug + Send + Sync>(
                 .for_each(|record| {
                     let mut record = record.expect("Error reading record");
 
-                    let chrom = std::str::from_utf8(&record.chrom)
-                        .expect("ERROR: could not convert chrom to str");
+                    let bind = record.chrom.clone();
+                    let chrom =
+                        std::str::from_utf8(&bind).expect("ERROR: could not convert chrom to str");
 
                     let strand = match record.strand() {
                         Some(genepred::Strand::Forward) => '+',
