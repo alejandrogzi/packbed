@@ -1,6 +1,6 @@
 [package]
 name = "packbed"
-version = "0.0.10"
+version = "0.0.13"
 edition = "2021"
 authors = ["alejandrogzi <alejandrxgzi@gmail.com>"]
 license = "MIT"
@@ -16,7 +16,9 @@ dashmap = { version = "6", features = ["rayon"], optional = true }
 clap = { version = "4.0", features = ["derive"] }
 rayon = "1.8.1"
 num_cpus = "1.16.0"
-genepred = { version = "0.0.8", features = ["rayon", "mmap"] }
+genepred = { version = "0.0.11", features = ["rayon", "mmap"] }
+log = "0.4"
+simple_logger = "5.2.0"
 
 [profile.release]
 lto = true
@@ -27,10 +29,6 @@ codegen-units = 1
 default = ["hashmap"]
 hashmap = []
 dashmap = ["dep:dashmap"]
-
-[[bin]]
-name = "packbed"
-path = "src/main.rs"
 
 [lib]
 name = "packbed"

@@ -18,7 +18,7 @@ struct Args {
         value_name = "PATHS",
         value_delimiter = ',',
         num_args = 1..,
-        help = "Paths to BED12 files delimited by comma"
+        help = "Paths to BED files delimited by comma"
     )]
     pub bed: Vec<PathBuf>,
 
@@ -60,13 +60,16 @@ struct Args {
     pub subdirs: bool,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    simple_logger::init_with_level(log::Level::Warn)?;
     let args = Args::parse();
 
-    rayon::ThreadPoolBuilder::new()
+    let components = rayon::ThreadPoolBuilder::new()
         .num_threads(args.threads)
         .build()
-        .unwrap();
+        .map_err(Box::<dyn std::error::Error>::from)?
+        .install(|| packbed::pack(args.bed, args.modes, args.overlap_type))?;
 
-    let _ = packbed::pack(args.bed, args.modes, args.overlap_type);
+    drop(components);
+    Ok(())
 }
