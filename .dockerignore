@@ -1,0 +1,11 @@
+.git
+.github
+assets
+**/target
+.venv
+**/__pycache__
+**/.ruff_cache
+**/.pytest_cache
+py-packbed/.venv
+py-packbed/dist
+py-packbed/tests

@@ -1,0 +1,78 @@
+name: Docker
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: packbed
+            dockerfile: assets/images/packbed.Dockerfile
+          - image: py-packbed
+            dockerfile: assets/images/py-packbed.Dockerfile
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          load: true
+          tags: ${{ env.IMAGE }}:smoke
+
+      - name: Smoke test
+        run: |
+          if [ "${{ matrix.image }}" = "packbed" ]; then
+            printf 'chr1\t100\t200\tgeneA\t0\t+\n' > /tmp/t.bed
+            printf 'chr1\t150\t260\tgeneB\t0\t+\n' >> /tmp/t.bed
+            docker run --rm "$IMAGE" --version
+            docker run --rm -v /tmp:/data "$IMAGE" -b /data/t.bed -m reference
+          else
+            docker run --rm "$IMAGE" -c \
+              "import packbed, importlib.metadata as m; \
+              print('packbed', m.version('py-packbed'))"
+          fi
+          docker run --rm --entrypoint sh "$IMAGE" \
+            -c 'ps -e >/dev/null && echo "ps ok"'
+
+      - name: Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

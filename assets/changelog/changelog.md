@@ -12,6 +12,13 @@ empty `[Unreleased]` section on top.
 
 ## [0.0.14] - 2026-09-02
 
+### Added
+
+- Per-release Docker images `ghcr.io/alejandrogzi/packbed` and
+  `ghcr.io/alejandrogzi/py-packbed` (Dockerfiles in `assets/images/`,
+  published by `.github/workflows/docker.yml` on `v*` tags); minimal images
+  with `procps` for nextflow compatibility.
+
 ### Changed
 
 - `packbed` 0.0.14 published to crates.io (d47b609).
