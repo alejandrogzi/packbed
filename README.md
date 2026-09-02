@@ -18,7 +18,6 @@
     </a>
   </p>
 
-
   <p align="center">
     pack a .bed into overlapping components
   </p>
@@ -29,8 +28,8 @@
     <img width=700 align="center" src="./assets/img.png">
 </p>
 
-
 ## Features
+
 - pack any number of .bed files into overlapping components through the Rust library or Python package
 - automatically detect BED3, BED4, BED5, BED6, BED8, BED9, and BED12+ inputs
 - group overlaps by exon, CDS, or transcript boundaries
@@ -43,7 +42,9 @@
 > - Adds a conversion-only Python package API
 
 ## Usage
+
 ### Binary
+
 ``` bash
 Usage: packbed [OPTIONS] --bed <PATHS>... --mode <MODE>...
 
@@ -62,6 +63,7 @@ packbed -b path/to/reference.bed,path/to/query.bed -m reference,query --overlap_
 ```
 
 ### Library
+
 ``` rust
 use std::path::PathBuf;
 
@@ -79,13 +81,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
 ### Python
+
 Install from PyPI once releases are published:
+
 ```bash
 pip install py-packbed
 ```
 
 Or build the local port during development:
+
 ```bash
 git clone https://github.com/alejandrogzi/packbed.git && cd packbed/py-packbed
 python -m venv .venv
@@ -93,7 +99,9 @@ source .venv/bin/activate
 python -m pip install maturin
 maturin develop --release
 ```
+
 use it:
+
 ``` python
 import packbed
 
