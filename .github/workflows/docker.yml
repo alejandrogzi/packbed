@@ -58,14 +58,15 @@ jobs:
           if [ "${{ matrix.image }}" = "packbed" ]; then
             printf 'chr1\t100\t200\tgeneA\t0\t+\n' > /tmp/t.bed
             printf 'chr1\t150\t260\tgeneB\t0\t+\n' >> /tmp/t.bed
-            docker run --rm "$IMAGE" --version
-            docker run --rm -v /tmp:/data "$IMAGE" -b /data/t.bed -m reference
+            docker run --rm "${IMAGE}:smoke" --version
+            docker run --rm -v /tmp:/data "${IMAGE}:smoke" \
+              -b /data/t.bed -m reference
           else
-            docker run --rm "$IMAGE" -c \
+            docker run --rm "${IMAGE}:smoke" -c \
               "import packbed, importlib.metadata as m; \
               print('packbed', m.version('py-packbed'))"
           fi
-          docker run --rm --entrypoint sh "$IMAGE" \
+          docker run --rm --entrypoint sh "${IMAGE}:smoke" \
             -c 'ps -e >/dev/null && echo "ps ok"'
 
       - name: Push image
