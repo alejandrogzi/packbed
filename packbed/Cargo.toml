@@ -16,7 +16,7 @@ dashmap = { version = "6", features = ["rayon"], optional = true }
 clap = { version = "4.0", features = ["derive"] }
 rayon = "1.8.1"
 num_cpus = "1.16.0"
-genepred = { version = "0.0.11", features = ["rayon", "mmap"] }
+genepred = { version = "0.0.16", features = ["rayon", "mmap"] }
 log = "0.4"
 simple_logger = "5.2.0"
 

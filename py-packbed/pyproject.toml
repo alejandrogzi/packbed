@@ -4,12 +4,37 @@ build-backend = "maturin"
 
 [project]
 name = "py-packbed"
+description = "Python bindings for packing BED records into overlapping components"
+readme = "README.md"
 requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [
+    { name = "alejandrogzi", email = "alejandrxgzi@gmail.com" },
+]
+keywords = ["bed", "genomics", "overlap", "transcript", "components"]
 classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: Implementation :: CPython",
-    "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
 ]
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/alejandrogzi/packbed"
+Repository = "https://github.com/alejandrogzi/packbed"
+Issues = "https://github.com/alejandrogzi/packbed/issues"
+
 [tool.maturin]
-features = ["pyo3/extension-module"]
+features = ["pyo3/extension-module", "pyo3/abi3-py38"]
+module-name = "packbed"
+python-source = "python"
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"

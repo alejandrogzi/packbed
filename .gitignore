@@ -1,2 +1,7 @@
-/target
-/test
+target/
+dist/
+build/
+__pycache__/
+*.pyc
+.venv
+*.egg-info/
