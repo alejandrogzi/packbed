@@ -10,6 +10,16 @@ empty `[Unreleased]` section on top.
 
 ## [Unreleased]
 
+## [0.0.14] - 2026-09-02
+
+### Changed
+
+- `packbed` 0.0.14 published to crates.io (d47b609).
+- `py-packbed` version aligned to 0.0.14 so the `v0.0.14` tag passes
+  publish-workflow validation.
+- README updates (3c3c982) and CI fix installing `clippy`/`rustfmt` components
+  so the nightly matrix is green again (1f39c98).
+
 ## [0.0.13] - 2026-09-02
 
 ### Breaking

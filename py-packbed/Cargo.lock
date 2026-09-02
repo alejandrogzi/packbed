@@ -271,7 +271,7 @@ dependencies = [
 
 [[package]]
 name = "packbed"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "clap",
  "genepred",
@@ -304,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "py-packbed"
-version = "0.0.13"
+version = "0.0.14"
 dependencies = [
  "packbed",
  "pyo3",
