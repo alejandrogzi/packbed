@@ -1,86 +1,82 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  pull_request:
+  push:
+    tags-ignore:
+      - "v*"
 
 jobs:
-  build-unix:
+  rust:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        rust: [stable, nightly]
         os: [ubuntu-latest, macos-latest]
+        rust: [stable, nightly]
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
 
-      - name: Cargo check
+      - name: Check packbed
         run: cargo check --manifest-path ./packbed/Cargo.toml
 
-      - name: Cargo clippy
-        run: cargo clippy --manifest-path ./packbed/Cargo.toml
+      - name: Lint packbed
+        run: |
+          cargo clippy --manifest-path ./packbed/Cargo.toml --all-targets \
+            --all-features
 
-      - name: Cargo build release
+      - name: Test packbed
+        run: cargo test --manifest-path ./packbed/Cargo.toml
+
+      - name: Test packbed (dashmap backend)
+        run: cargo test --manifest-path ./packbed/Cargo.toml --features dashmap
+
+      - name: Check formatting
+        run: |
+          cargo fmt --manifest-path ./packbed/Cargo.toml --check
+          cargo fmt --manifest-path ./py-packbed/Cargo.toml --check
+
+      - name: Build packbed release
         run: cargo build --manifest-path ./packbed/Cargo.toml --release
 
-      - name: Cargo clean
-        if: ${{ matrix.rust == 'stable' }}
-        run: cargo clean --manifest-path ./packbed/Cargo.toml
-
-      - name: Upload build artifacts
-        if: ${{ startsWith(matrix.os, 'macos') != true && matrix.rust == 'stable' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifacts-${{ matrix.os }}
-          path: |
-            ./packbed/target/release/packbed/packbed
-            ./packbed/target/release/packbed/libpackbed.rlib
-
-      - name: Upload build artifacts (macOS)
-        if: ${{ startsWith(matrix.os, 'macos') && matrix.rust == 'stable' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifacts-${{ matrix.os }}
-          path: |
-            ./packbed/target/release/packbed/packbed
-            ./packbed/target/release/libpackbed/packbed.dylib
-  py_port:
-    needs: [build-unix]
+  python:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.9"]
-        target: [x86_64, aarch64]
-    steps:
-      - uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v4
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
 
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install pipx
-        run: python -m pip install --user pipx && python -m pipx ensurepath
+      - name: Test py-packbed Rust crate
+        run: cargo test --manifest-path ./py-packbed/Cargo.toml
 
-      - name: Install dependencies
-        run: pipx install hatch maturin
+      - name: Lint py-packbed
+        run: cargo clippy --manifest-path ./py-packbed/Cargo.toml --all-targets
 
-      - name: Create Hatch environment
-        shell: bash
-        run: cd py-packbed && hatch env create
+      - name: Install Python build dependencies
+        run: python -m pip install --upgrade pip maturin pytest
 
-      - name: Activate Hatch env, build and run py test
-        shell: bash
-        run: |
-          cd py-packbed
-          source $(hatch env find)/bin/activate
-          maturin develop --release --manifest-path Cargo.toml
+      - name: Build py-packbed wheel
+        working-directory: py-packbed
+        run: maturin build --release --out dist
+
+      - name: Install py-packbed wheel
+        run: python -m pip install --force-reinstall py-packbed/dist/*.whl
+
+      - name: Test py-packbed
+        working-directory: py-packbed
+        run: python -m pytest

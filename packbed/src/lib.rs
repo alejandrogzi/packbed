@@ -5,9 +5,9 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use genepred::reader::ReaderError;
+pub use genepred::GenePred;
 use genepred::{
-    Bed12, Bed3, Bed4, Bed5, Bed6, Bed8, Bed9, BedFormat, GenePred, Reader, ReaderMode,
-    ReaderOptions,
+    Bed12, Bed3, Bed4, Bed5, Bed6, Bed8, Bed9, BedFormat, Reader, ReaderMode, ReaderOptions,
 };
 use log::warn;
 use rayon::prelude::*;
@@ -32,6 +32,9 @@ pub type Map<K, V> = DashMap<K, V>;
 /// Otherwise uses `HashMap`.
 #[cfg(not(feature = "dashmap"))]
 pub type Map<K, V> = HashMap<K, V>;
+
+/// Packed BED components grouped by chromosome and strand.
+pub type PackedComponents = Map<String, Vec<Vec<GenePred>>>;
 
 /// Creates a new thread-safe DashMap (requires `dashmap` feature).
 #[cfg(feature = "dashmap")]
@@ -310,7 +313,7 @@ pub fn pack<T: AsRef<Path> + Debug + Send + Sync>(
     files: Vec<T>,
     modes: Vec<Role>,
     overlap_type: OverlapType,
-) -> Result<Map<String, Vec<Vec<GenePred>>>, PackError> {
+) -> Result<PackedComponents, PackError> {
     if files.len() != modes.len() {
         return Err(PackError::InputCountMismatch {
             files: files.len(),
@@ -318,6 +321,7 @@ pub fn pack<T: AsRef<Path> + Debug + Send + Sync>(
         });
     }
 
+    #[cfg_attr(feature = "dashmap", allow(unused_mut))]
     let mut accumulator: Map<String, Vec<GenePred>> = init_map();
 
     for (file, mode) in files.iter().zip(modes.into_iter()) {
@@ -568,10 +572,11 @@ impl UnionFind {
 /// `tracks` must already be grouped by `chrom:strand`, for example `chr1:+` or `chr1:-`.
 /// In `CDS` mode this function uses coding exons when present and falls back to the
 /// transcript span when a record has no coding intervals.
-pub fn buckerize<I>(tracks: I, overlap_type: OverlapType) -> Map<String, Vec<Vec<GenePred>>>
+pub fn buckerize<I>(tracks: I, overlap_type: OverlapType) -> PackedComponents
 where
     I: IntoIterator<Item = (String, Vec<GenePred>)>,
 {
+    #[cfg_attr(feature = "dashmap", allow(unused_mut))]
     let mut cmap = init_map();
 
     tracks.into_iter().for_each(|(chr, transcripts)| {
@@ -991,5 +996,402 @@ mod tests {
         let empty = write_temp_bed("empty", "# comment only\n\n");
         let packed = pack(vec![empty], vec![Role::Reference], OverlapType::Exon).unwrap();
         assert!(packed.is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // Algorithm oracle + edge fixtures (v0.0.13 test hardening)
+    // ------------------------------------------------------------------
+
+    /// Tiny deterministic xorshift64* PRNG so the oracle needs no external deps.
+    struct Rng(u64);
+
+    impl Rng {
+        fn new(seed: u64) -> Self {
+            Rng(seed | 1) // avoid the all-zero xorshift fixpoint
+        }
+
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            if x == 0 {
+                x = 0x9E37_79B9_7F4A_7C15;
+            }
+            self.0 = x;
+            x
+        }
+
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    /// In-memory stand-in for a parsed BED12 record used by the oracle.
+    #[derive(Debug, Clone)]
+    struct TestRecord {
+        name: String,
+        chrom: String,
+        /// `Some('+')` / `Some('-')` / `None` (unstranded)
+        strand: Option<char>,
+        start: u64,
+        end: u64,
+        /// `None` means no CDS (thickStart == thickEnd == 0).
+        thick: Option<(u64, u64)>,
+        exons: Vec<(u64, u64)>,
+    }
+
+    fn render_bed12(record: &TestRecord) -> String {
+        let sizes = record
+            .exons
+            .iter()
+            .map(|(start, end)| (end - start).to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let starts = record
+            .exons
+            .iter()
+            .map(|(start, _)| (start - record.start).to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let strand = record
+            .strand
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| ".".to_string());
+        let (thick_start, thick_end) = record.thick.unwrap_or((0, 0));
+
+        format!(
+            "{}\t{}\t{}\t{}\t0\t{}\t{}\t{}\t0,0,0\t{}\t{},\t{},\n",
+            record.chrom,
+            record.start,
+            record.end,
+            record.name,
+            strand,
+            thick_start,
+            thick_end,
+            record.exons.len(),
+            sizes,
+            starts,
+        )
+    }
+
+    fn generate_records(rng: &mut Rng, start_index: usize, count: usize) -> Vec<TestRecord> {
+        (0..count)
+            .map(|offset| {
+                let index = start_index + offset;
+                let chrom = if rng.below(2) == 0 { "chr1" } else { "chr2" };
+                let strand = match rng.below(10) {
+                    0 | 1 => None, // ~20% unstranded
+                    2..=5 => Some('+'),
+                    _ => Some('-'),
+                };
+
+                let start = rng.below(1_000_000);
+                let exon_count = 1 + rng.below(6) as usize;
+                let mut exons = Vec::with_capacity(exon_count);
+                let mut cursor = start;
+                for i in 0..exon_count {
+                    let len = 10 + rng.below(500);
+                    exons.push((cursor, cursor + len));
+                    cursor += len
+                        + if i + 1 == exon_count {
+                            0
+                        } else {
+                            10 + rng.below(2_000)
+                        };
+                }
+                let end = cursor;
+                let span = end - start;
+                let thick = if span < 2 || rng.below(10) < 3 {
+                    None
+                } else {
+                    let thick_start = start + 1 + rng.below(span - 1);
+                    let thick_end = thick_start + 1 + rng.below(end - thick_start);
+                    Some((thick_start, thick_end))
+                };
+
+                TestRecord {
+                    name: format!("tx_{index:05}"),
+                    chrom: chrom.to_string(),
+                    strand,
+                    start,
+                    end,
+                    thick,
+                    exons,
+                }
+            })
+            .collect()
+    }
+
+    /// Per-mode overlap segments for a `TestRecord`, mirroring `overlap_segments`.
+    fn record_segments(record: &TestRecord, overlap_type: OverlapType) -> Vec<(u64, u64)> {
+        match overlap_type {
+            OverlapType::Exon => record.exons.clone(),
+            OverlapType::Boundary => vec![(record.start, record.end)],
+            OverlapType::CDS => {
+                let coding = match record.thick {
+                    Some((thick_start, thick_end)) if thick_start < thick_end => record
+                        .exons
+                        .iter()
+                        .filter_map(|(start, end)| {
+                            let coding_start = (*start).max(thick_start);
+                            let coding_end = (*end).min(thick_end);
+                            (coding_start < coding_end).then_some((coding_start, coding_end))
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                if coding.is_empty() {
+                    vec![(record.start, record.end)]
+                } else {
+                    coding
+                }
+            }
+        }
+    }
+
+    fn pair_overlaps(left: &TestRecord, right: &TestRecord, overlap_type: OverlapType) -> bool {
+        let left_segments = record_segments(left, overlap_type);
+        let right_segments = record_segments(right, overlap_type);
+        left_segments.iter().any(|(left_start, left_end)| {
+            right_segments
+                .iter()
+                .any(|(right_start, right_end)| left_start < right_end && right_start < left_end)
+        })
+    }
+
+    /// Brute-force reference: naive O(n^2) interval-graph connected components.
+    fn naive_components(
+        records: &[TestRecord],
+        overlap_type: OverlapType,
+    ) -> BTreeMap<String, Vec<Vec<String>>> {
+        let mut tracks: HashMap<String, Vec<&TestRecord>> = HashMap::new();
+        for record in records {
+            let keys: Vec<String> = match record.strand {
+                Some('+') => vec![format!("{}:+", record.chrom)],
+                Some('-') => vec![format!("{}:-", record.chrom)],
+                _ => vec![format!("{}:+", record.chrom), format!("{}:-", record.chrom)],
+            };
+            for key in keys {
+                tracks.entry(key).or_default().push(record);
+            }
+        }
+
+        let mut out = BTreeMap::new();
+        for (key, track) in tracks {
+            let mut uf = UnionFind::new(track.len());
+            for i in 0..track.len() {
+                for j in (i + 1)..track.len() {
+                    if pair_overlaps(track[i], track[j], overlap_type) {
+                        uf.union(i, j);
+                    }
+                }
+            }
+
+            let mut groups: HashMap<usize, Vec<&TestRecord>> = HashMap::new();
+            for (idx, record) in track.into_iter().enumerate() {
+                groups.entry(uf.find(idx)).or_default().push(record);
+            }
+
+            let mut components = groups
+                .into_values()
+                .map(|mut component| {
+                    component.sort_by_key(|record| record.name.clone());
+                    component
+                        .into_iter()
+                        .map(|record| record.name.clone())
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            components.sort();
+            out.insert(key, components);
+        }
+        out
+    }
+
+    /// Canonical shape of real `pack` output keyed by transcript name so it can be
+    /// compared directly against `naive_components`.
+    fn canonical_by_name(map: PackedComponents) -> BTreeMap<String, Vec<Vec<String>>> {
+        let mut out = BTreeMap::new();
+        for (key, components) in map {
+            let mut components = components
+                .into_iter()
+                .map(|mut component| {
+                    component.sort_by_key(|gene| {
+                        gene.name().map(|name| name.to_vec()).unwrap_or_default()
+                    });
+                    component
+                        .into_iter()
+                        .map(|gene| {
+                            String::from_utf8_lossy(gene.name().unwrap_or(b"")).into_owned()
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>();
+            components.sort();
+            out.insert(key, components);
+        }
+        out
+    }
+
+    fn pack_text(contents: &str, overlap_type: OverlapType) -> BTreeMap<String, Vec<Vec<String>>> {
+        let bed = write_temp_bed("fixture", contents);
+        canonical_by_name(pack(vec![bed], vec![Role::Reference], overlap_type).unwrap())
+    }
+
+    #[test]
+    fn oracle_matches_naive_interval_graph() {
+        init_logger();
+
+        for seed in 0..5u64 {
+            let mut rng = Rng::new(0x1234_5678_9ABC_DEF0 ^ seed);
+            let records = generate_records(&mut rng, 0, 120);
+            let bed = write_temp_bed(
+                "oracle",
+                &records.iter().map(render_bed12).collect::<String>(),
+            );
+
+            for overlap_type in [OverlapType::Exon, OverlapType::CDS, OverlapType::Boundary] {
+                let actual = canonical_by_name(
+                    pack(vec![bed.clone()], vec![Role::Reference], overlap_type).unwrap(),
+                );
+                let expected = naive_components(&records, overlap_type);
+                assert_eq!(
+                    actual, expected,
+                    "seed={seed}, overlap_type={overlap_type:?}"
+                );
+                assert!(actual
+                    .values()
+                    .all(|components| components.iter().all(|component| !component.is_empty())));
+            }
+        }
+    }
+
+    #[test]
+    fn chain_bridge_groups_all_into_one_component() {
+        init_logger();
+
+        // a overlaps b, b overlaps c, a and c never touch directly.
+        let bed = "chr1\t0\t100\ta\t0\t+\t0\t100\t0,0,0\t1\t100,\t0,\n\
+                   chr1\t50\t150\tb\t0\t+\t50\t150\t0,0,0\t1\t100,\t0,\n\
+                   chr1\t120\t220\tc\t0\t+\t120\t220\t0,0,0\t1\t100,\t0,\n\
+                   chr1\t400\t500\td\t0\t+\t400\t500\t0,0,0\t1\t100,\t0,\n";
+        let packed = pack_text(bed, OverlapType::Boundary);
+        assert_eq!(packed["chr1:+"].len(), 2);
+        assert_eq!(packed["chr1:+"][0], vec!["a", "b", "c"]);
+        assert_eq!(packed["chr1:+"][1], vec!["d"]);
+    }
+
+    #[test]
+    fn touching_intervals_do_not_merge() {
+        init_logger();
+
+        // a ends exactly where b begins: overlap must be strict (`start < prev_end`).
+        let bed = "chr1\t0\t100\ta\t0\t+\t0\t100\t0,0,0\t1\t100,\t0,\n\
+                   chr1\t100\t200\tb\t0\t+\t100\t200\t0,0,0\t1\t100,\t0,\n";
+        for overlap_type in [OverlapType::Exon, OverlapType::CDS, OverlapType::Boundary] {
+            let packed = pack_text(bed, overlap_type);
+            assert_eq!(packed["chr1:+"].len(), 2, "overlap_type={overlap_type:?}");
+        }
+    }
+
+    #[test]
+    fn intron_only_overlap_merges_in_boundary_but_not_exon_mode() {
+        init_logger();
+
+        // a: exons [0,40] [80,120] (intron 40-80); b: exons [50,60] [130,170] (intron 60-130).
+        // Transcript spans overlap, but no exon pair intersects.
+        let bed = "chr1\t0\t120\ta\t0\t+\t0\t120\t0,0,0\t2\t40,40,\t0,80,\n\
+                   chr1\t50\t170\tb\t0\t+\t50\t170\t0,0,0\t2\t10,40,\t0,80,\n";
+        let boundary = pack_text(bed, OverlapType::Boundary);
+        assert_eq!(boundary["chr1:+"].len(), 1);
+        let exon = pack_text(bed, OverlapType::Exon);
+        assert_eq!(exon["chr1:+"].len(), 2);
+    }
+
+    #[test]
+    fn cds_and_exon_modes_agree_with_thick_bounds() {
+        init_logger();
+
+        // BED9: single implicit exon per record; thick bounds define the CDS.
+        // Exon mode merges (spans overlap); CDS mode keeps them apart (CDS disjoint).
+        let bed9 = "chr1\t100\t500\tga\t0\t+\t100\t150\t0,0,0\n\
+                    chr1\t150\t550\tgb\t0\t+\t300\t400\t0,0,0\n";
+        let exon = pack_text(bed9, OverlapType::Exon);
+        assert_eq!(exon["chr1:+"].len(), 1);
+        let cds = pack_text(bed9, OverlapType::CDS);
+        assert_eq!(cds["chr1:+"].len(), 2);
+    }
+
+    #[test]
+    fn unstranded_records_appear_on_both_strands_without_cross_merging() {
+        init_logger();
+
+        let bed = "chr1\t0\t100\ta\t0\t.\t0\t100\t0,0,0\t1\t100,\t0,\n\
+                   chr1\t50\t150\tb\t0\t+\t50\t150\t0,0,0\t1\t100,\t0,\n\
+                   chr1\t50\t150\tc\t0\t-\t50\t150\t0,0,0\t1\t100,\t0,\n";
+        let packed = pack_text(bed, OverlapType::Boundary);
+        assert!(packed.contains_key("chr1:+"));
+        assert!(packed.contains_key("chr1:-"));
+        assert_eq!(packed["chr1:+"][0], vec!["a", "b"]);
+        assert_eq!(packed["chr1:-"][0], vec!["a", "c"]);
+    }
+
+    #[test]
+    fn input_order_does_not_affect_components() {
+        init_logger();
+
+        let rows = [
+            "chr2\t0\t100\tc\t0\t+\t0\t100\t0,0,0\t1\t100,\t0,\n",
+            "chr1\t200\t300\tb\t0\t+\t200\t300\t0,0,0\t1\t100,\t0,\n",
+            "chr1\t0\t100\ta\t0\t+\t0\t100\t0,0,0\t1\t100,\t0,\n",
+        ];
+        let expected = pack_text(&rows.concat(), OverlapType::Boundary);
+        let actual = pack_text(
+            &rows.iter().rev().cloned().collect::<String>(),
+            OverlapType::Boundary,
+        );
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn duplicate_records_stay_in_one_component() {
+        init_logger();
+
+        let bed = "chr1\t0\t100\tdup\t0\t+\t0\t100\t0,0,0\t1\t100,\t0,\n\
+                   chr1\t0\t100\tdup\t0\t+\t0\t100\t0,0,0\t1\t100,\t0,\n";
+        let packed = pack_text(bed, OverlapType::Exon);
+        assert_eq!(packed["chr1:+"].len(), 1);
+        assert_eq!(packed["chr1:+"][0].len(), 2);
+    }
+
+    #[test]
+    fn overlapping_coords_on_different_chromosomes_do_not_merge() {
+        init_logger();
+
+        let bed = "chr1\t0\t1000\ta\t0\t+\t0\t1000\t0,0,0\t1\t1000,\t0,\n\
+                   chr2\t0\t1000\tb\t0\t+\t0\t1000\t0,0,0\t1\t1000,\t0,\n";
+        let packed = pack_text(bed, OverlapType::Boundary);
+        assert_eq!(packed["chr1:+"][0], vec!["a"]);
+        assert_eq!(packed["chr2:+"][0], vec!["b"]);
+    }
+
+    #[test]
+    fn missing_file_returns_io_error() {
+        init_logger();
+
+        let err = pack(
+            vec![PathBuf::from("/nonexistent/path/foo.bed")],
+            vec![Role::Reference],
+            OverlapType::Exon,
+        )
+        .unwrap_err();
+
+        match err {
+            PackError::Io { path, .. } => {
+                assert_eq!(path, PathBuf::from("/nonexistent/path/foo.bed"));
+            }
+            other => panic!("expected PackError::Io, got {other:?}"),
+        }
     }
 }

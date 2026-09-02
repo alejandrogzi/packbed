@@ -4,8 +4,8 @@
   </h1>
 
   <p align="center">
-    <a href="https://img.shields.io/badge/version-0.0.1dev-green" target="_blank">
-      <img alt="Version Badge" src="https://img.shields.io/badge/version-0.0.1-green">
+    <a href="https://img.shields.io/badge/version-0.0.13-green" target="_blank">
+      <img alt="Version Badge" src="https://img.shields.io/badge/version-0.0.13-green">
     </a>
     <a href="https://crates.io/crates/packbed" target="_blank">
       <img alt="Crates.io Version" src="https://img.shields.io/crates/v/packbed">
@@ -26,89 +26,84 @@
 </p>
 
 <p align="center">
-    <img width=700 align="center" src="./.github/assets/img.png">
+    <img width=700 align="center" src="./assets/img.png">
 </p>
 
 
 ## Features
-- pack any number of .bed files into overlapping components through a binary, Rust library or Python module
-- write a unique overlapping-component-colorized bed file out of any number of .bed files through a binary, Rust library or Python module
-- split components into separate .bed files through a binary, Rust library or Python module
-- write serialized components to a binary file through a binary and Rust library
-- read serialized components from a binary file through a Rust library or Python module
-- write specific components each to a different .bed file through a Rust library or Python module
+- pack any number of .bed files into overlapping components through the Rust library or Python package
+- automatically detect BED3, BED4, BED5, BED6, BED8, BED9, and BED12+ inputs
+- group overlaps by exon, CDS, or transcript boundaries
+- annotate inputs as reference or query records during packing
+- expose Python conversion of packed Rust components as dictionaries of `GenePred` objects
 
-> What's new on packbed v0.0.7!
+> What's new on packbed v0.0.13!
 >
-> - Implements a new query range algorithm to pack components
-> - Reduces time by more than x25 when working with more than 1 million reads
+> - Supports mixed BED widths
+> - Adds a conversion-only Python package API
 
 ## Usage
 ### Binary
 ``` bash
-Usage: packbed [OPTIONS] --bed <PATHS>... --output <PATH>
-
-Arguments:
-    -b, --bed <PATHS>...     Paths to BED12 files delimited by comma
-    -o, --output <PATH>      Path to output BED12 file [not required if -c flag is set]
+Usage: packbed [OPTIONS] --bed <PATHS>... --mode <MODE>...
 
 Options:
-    -t, --threads <THREADS>  Number of threads [default: 8]
-    --type <TYPE>   Type of output [default: bed] [possible values: bin, comp, bed]
-    --overlap_type <TYPE>  Type of overlap [default: exon]
-    -s, --subdirs   Flag to split components into separate BED files in subdirectories
-    --colorize      Flag to colorize components in output BED(s) file
-    -h, --help      Print help
-    --version:      Print version
+    -b, --bed <PATHS>...       Paths to BED files delimited by comma
+    -m, --mode <MODE>...       Mode for each BED file [R/r/reference or Q/q/query]
+    -t, --threads <THREADS>    Number of threads
+    --overlap_type <TYPE>      Type of overlap [default: exon] [possible values: exon, cds, bounds, boundary]
+    -s, --subdirs <FLAG>       Flag reserved for splitting components into subdirectories
+    -h, --help                 Print help
+    -V, --version              Print version
 ```
 
-> [!TIP]
-> If you want to get components in separate .bed files use:
-> ```bash
-> packbed -b path/to/b1.bed,path/to/b2.bed -o path/to/output --type comp
-> ```
-> in case you want to send each component to a different subdirectory (good to parallelize processes):
-> ```bash
-> packbed -b path/to/b1.bed,path/to/b2.bed -o path/to/output --type comp -s
-> ```
-> if you want to colorize the components but send them all to just 1.bed file [default]:
-> ```bash
-> packbed -b path/to/b1.bed,path/to/b2.bed -o path/to/output --colorize
-> ```
+```bash
+packbed -b path/to/reference.bed,path/to/query.bed -m reference,query --overlap_type exon
+```
 
 ### Library
 ``` rust
-use packbed::packbed;
+use std::path::PathBuf;
 
-fn main() {
+use packbed::{pack, OverlapType, Role};
 
-    let bed1 = PathBuf::new("/path/to/b1.bed");
-    let bed2 = PathBuf::new("/path/to/b2.bed");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+
+    let bed1 = PathBuf::from("/path/to/reference.bed");
+    let bed2 = PathBuf::from("/path/to/query.bed");
     let beds = vec![bed1, bed2];
+    let roles = vec![Role::Reference, Role::Query];
 
-    let overlap_type = OverlapType::Exon;
-    let colorize = true;
+    let _comps = pack(beds, roles, OverlapType::Exon)?;
 
-    let comps: HashMap<String, Vec<Vec<Arc<GenePred>>>> = packbed(
-        beds,
-        overlap_type,
-        colorize)
-    .unwrap();
+    Ok(())
 }
 ```
 ### Python
-build the port to install it as a pkg:
+Install from PyPI once releases are published:
+```bash
+pip install py-packbed
+```
+
+Or build the local port during development:
 ```bash
 git clone https://github.com/alejandrogzi/packbed.git && cd packbed/py-packbed
-hatch shell
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install maturin
 maturin develop --release
 ```
 use it:
 ``` python
-from packbed import pack
+import packbed
 
 beds = ["path/to/bed1.bed", "path/to/bed2.bed"]
-comps = pack(beds)
+roles = ["reference", "query"]
+comps = packbed.pack(beds, roles, overlap_type="exon")
 ```
 
 ### crate: [https://crates.io/crates/packbed](https://crates.io/crates/packbed)
+
+## Changelog
+
+See [assets/changelog/changelog.md](assets/changelog/changelog.md) for the full release history.
